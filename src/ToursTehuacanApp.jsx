@@ -24,7 +24,9 @@ import {
   X,
   ChevronRight,
   ChevronLeft,
-  Sparkles
+  Tag,
+  Table as TableIcon,
+  ExternalLink
 } from 'lucide-react';
 
 // ============================================================================
@@ -37,16 +39,112 @@ const SUPABASE_KEY =
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// Datos bancarios y de contacto de la agencia (puedes editarlos aquí)
-const AGENCY_BANK_INFO = {
-  bank: 'BBVA / Banorte',
-  holder: 'Tours Tehuacán',
-  clabe: '012 650 01548923412 8',
-  card: '4152 3138 9012 4455',
-  whatsapp: '238 123 4567',
+// Datos oficiales de Tours Tehuacán y cuentas Banorte
+const AGENCY_INFO = {
+  name: 'TOURS TEHUACÁN',
+  slogan: 'EL VIAJE QUE TE MERECES',
+  logoSrc: '/logo-tours-tehuacan.png',
+  address: '13 Poniente #1007A Fraccionamiento Concordia. Tehuacán, Puebla cp. 75763',
+  facebookName: 'Tours Tehuacán',
+  facebookUrl: 'https://www.facebook.com/share/1JiYBLVWYH/',
+  instagramHandle: '@tourstehuacan',
+  instagramUrl: 'https://www.instagram.com/tourstehuacan?knvt=MWwyNXFsdm5ldDhnMQ==',
+  rnt: '𝟯𝟱𝟮𝟭𝟭𝟱𝟲𝟭𝗰𝟳𝗱𝗰𝟭',
+  phone: '2381280864',
   email: 'tourstehuacan@gmail.com',
-  address: 'Tehuacán, Puebla, México'
+  bank: 'BANORTE',
+  holder: 'Maria de Jesús Herrera Rendón',
+  card: '5264246831944813',
+  clabe: '072670012809081786',
+  accountNumber: '1280908178'
 };
+
+// Códigos promocionales / preferenciales válidos (puedes agregar más aquí)
+const VALID_CODES = {
+  CLIENTE: { label: 'Precio Cliente', discountRate: null, useClientPrice: true },
+  TEHUACAN10: { label: 'Código Preferencial', discountRate: 0.1, useClientPrice: true },
+  VIP15: { label: 'Código Especial', discountRate: 0.15, useClientPrice: true }
+};
+
+// Validación formal de CURP (18 caracteres) o Clave de Elector INE (18 caracteres)
+const CURP_REGEX =
+  /^[A-Z]{4}\d{6}[HM](AS|BC|BS|CC|CL|CM|CS|CH|DF|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL|OC|PL|QT|QR|SP|SL|SR|TC|TS|TL|VZ|YN|ZS)[B-DF-HJ-NP-TV-Z]{3}[A-Z0-9]\d$/;
+const INE_KEY_REGEX =
+  /^[B-DF-HJ-NP-TV-Z]{6}\d{6}[HM]\d{2}[A-Z0-9]{3}$/;
+
+function validateCurpOrIne(rawValue, titularName = '') {
+  const clean = (rawValue || '').trim().toUpperCase().replace(/\s+/g, '');
+  if (!clean) {
+    return { valid: false, message: 'Ingresa tu CURP o Clave de Elector (INE).' };
+  }
+
+  const isCurp = CURP_REGEX.test(clean);
+  const isIne = INE_KEY_REGEX.test(clean);
+
+  if (!isCurp && !isIne) {
+    return {
+      valid: false,
+      message:
+        'El formato no corresponde a una CURP (18 caracteres) ni a una Clave de Elector de INE válida.'
+    };
+  }
+
+  const nameTokens = titularName
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (isCurp && nameTokens.length >= 2) {
+    const firstLastName = nameTokens[nameTokens.length - 2] || nameTokens[0];
+    const firstGivenName = nameTokens[0];
+    const curpInitial1 = clean[0];
+    const curpVowel1 = clean[1];
+    const curpInitial2 = clean[3];
+
+    const firstVowelInLast =
+      firstLastName.slice(1).match(/[AEIOU]/)?.[0] || '';
+
+    if (
+      curpInitial1 !== firstLastName[0] ||
+      curpInitial2 !== firstGivenName[0] ||
+      (firstVowelInLast && curpVowel1 !== firstVowelInLast)
+    ) {
+      return {
+        valid: false,
+        message:
+          'Las iniciales de la CURP no coinciden con el nombre del titular ingresado. Revísalo por favor.'
+      };
+    }
+  }
+
+  if (isIne && nameTokens.length >= 2) {
+    const apellidoPaterno = nameTokens[nameTokens.length - 2] || '';
+    const apellidoMaterno = nameTokens[nameTokens.length - 1] || '';
+    const nombre = nameTokens[0] || '';
+    const ineInitials = clean.slice(0, 6);
+    const expectedInitials = `${apellidoPaterno.slice(0, 2)}${apellidoMaterno.slice(
+      0,
+      2
+    )}${nombre.slice(0, 2)}`.padEnd(6, 'X');
+
+    if (ineInitials !== expectedInitials) {
+      return {
+        valid: false,
+        message:
+          'Las primeras letras de la Clave de Elector (INE) no coinciden con el nombre del titular.'
+      };
+    }
+  }
+
+  return {
+    valid: true,
+    type: isCurp ? 'CURP' : 'Clave de Elector INE',
+    normalized: clean
+  };
+}
 
 export default function ToursTehuacanApp() {
   // Navegación principal: 'client' (público) | 'admin' (privado)
@@ -66,16 +164,28 @@ export default function ToursTehuacanApp() {
   // Flujo del Cliente (Pasos 1 al 4)
   const [step, setStep] = useState(1);
   const [selectedTour, setSelectedTour] = useState(null);
-  const [passengers, setPassengers] = useState(1);
+  const [seatsCount, setSeatsCount] = useState(1);
+  const [promoInput, setPromoInput] = useState('');
+  const [appliedCode, setAppliedCode] = useState(null);
+  const [promoFeedback, setPromoFeedback] = useState('');
+
+  // Niños
+  const [hasChildren, setHasChildren] = useState(false);
+  const [childrenCount, setChildrenCount] = useState(1);
+  const [childrenAges, setChildrenAges] = useState(['']);
+
   const [clientForm, setClientForm] = useState({
     name: '',
-    email: '',
     phone: '',
+    emergencyContact: '',
+    email: '',
     idNumber: '',
-    companions: ''
+    seatNamesList: ['']
   });
+
   const [receiptFile, setReceiptFile] = useState(null);
   const [receiptPreview, setReceiptPreview] = useState('');
+  const [copiedBankField, setCopiedBankField] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -87,10 +197,11 @@ export default function ToursTehuacanApp() {
   const isDrawingRef = useRef(false);
 
   // Estado del Panel de Administración
-  const [adminTab, setAdminTab] = useState('reservations'); // 'reservations' | 'tours'
+  const [adminTab, setAdminTab] = useState('reservations'); // 'reservations' | 'excel' | 'tours'
   const [reservations, setReservations] = useState([]);
   const [loadingReservations, setLoadingReservations] = useState(false);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [copiedExcelAll, setCopiedExcelAll] = useState(false);
 
   // Modales del Administrador
   const [selectedReservationModal, setSelectedReservationModal] = useState(null);
@@ -98,7 +209,7 @@ export default function ToursTehuacanApp() {
   const [copiedEmail, setCopiedEmail] = useState(false);
   const [contractViewReservation, setContractViewReservation] = useState(null);
 
-  // Modal de Crear / Editar Tour
+  // Modal de Crear / Editar Tour (incluye precio normal y precio cliente)
   const [tourModalOpen, setTourModalOpen] = useState(false);
   const [editingTour, setEditingTour] = useState(null);
   const [tourForm, setTourForm] = useState({
@@ -107,6 +218,7 @@ export default function ToursTehuacanApp() {
     date: '',
     duration: '1 día (Ida y vuelta)',
     price: '',
+    client_price: '',
     deposit: '',
     spots: 15,
     active: true,
@@ -165,6 +277,121 @@ export default function ToursTehuacanApp() {
       setReservations(data);
     }
     setLoadingReservations(false);
+  };
+
+  // Sincronizar campos de nombre por asiento al cambiar número de asientos
+  const handleSeatsChange = (newSeats) => {
+    const count = Math.max(1, Number(newSeats) || 1);
+    setSeatsCount(count);
+    setClientForm((prev) => {
+      const nextNames = [...(prev.seatNamesList || [])];
+      while (nextNames.length < count) nextNames.push('');
+      return { ...prev, seatNamesList: nextNames.slice(0, count) };
+    });
+  };
+
+  // Sincronizar edades de niños al cambiar cantidad
+  const handleChildrenCountChange = (newCount) => {
+    const count = Math.max(1, Number(newCount) || 1);
+    setChildrenCount(count);
+    setChildrenAges((prev) => {
+      const next = [...prev];
+      while (next.length < count) next.push('');
+      return next.slice(0, count);
+    });
+  };
+
+  // Aplicar código preferencial / cliente
+  const handleApplyPromoCode = () => {
+    const codeKey = promoInput.trim().toUpperCase();
+    if (!codeKey) {
+      setAppliedCode(null);
+      setPromoFeedback('Escribe un código para verificar.');
+      return;
+    }
+    const found = VALID_CODES[codeKey];
+    if (!found) {
+      setAppliedCode(null);
+      setPromoFeedback('Código no válido. Se aplicará el precio normal.');
+      return;
+    }
+    setAppliedCode({ code: codeKey, ...found });
+    setPromoFeedback(`Código "${codeKey}" aplicado (${found.label}).`);
+  };
+
+  // Cálculo de tarifas (Precio normal público vs precio de cliente/niño con código)
+  const getPricingSummary = () => {
+    if (!selectedTour) {
+      return {
+        unitPrice: 0,
+        childSeatPrice: 0,
+        paidChildrenCount: 0,
+        lapChildrenCount: 0,
+        totalAmount: 0,
+        depositAmount: 0
+      };
+    }
+
+    const normalPrice = Number(selectedTour.price) || 0;
+    const baseClientPrice =
+      Number(selectedTour.client_price) > 0
+        ? Number(selectedTour.client_price)
+        : normalPrice;
+
+    let unitPrice = normalPrice;
+    if (appliedCode) {
+      unitPrice =
+        typeof appliedCode.discountRate === 'number'
+          ? Math.round(baseClientPrice * (1 - appliedCode.discountRate))
+          : baseClientPrice;
+    }
+
+    let paidChildrenCount = 0;
+    let lapChildrenCount = 0;
+
+    if (hasChildren) {
+      childrenAges.slice(0, childrenCount).forEach((ageStr) => {
+        const age = Number(ageStr);
+        if (!Number.isNaN(age) && ageStr !== '') {
+          if (age <= 3) {
+            lapChildrenCount += 1;
+          } else if (age <= 10) {
+            paidChildrenCount += 1;
+          }
+        }
+      });
+    }
+
+    const adultOrStandardSeats = Math.max(0, Number(seatsCount) - paidChildrenCount);
+    const childrenSeatRate = appliedCode ? unitPrice : baseClientPrice;
+
+    const totalAmount =
+      adultOrStandardSeats * unitPrice + paidChildrenCount * childrenSeatRate;
+
+    const depositPerSeat = Number(selectedTour.deposit) || 0;
+    const depositAmount = depositPerSeat * Number(seatsCount);
+
+    return {
+      unitPrice,
+      childSeatPrice: childrenSeatRate,
+      paidChildrenCount,
+      lapChildrenCount,
+      totalAmount,
+      depositAmount
+    };
+  };
+
+  const pricing = getPricingSummary();
+
+  // Copiar datos bancarios
+  const copyBankText = async (label, value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedBankField(label);
+      setTimeout(() => setCopiedBankField(''), 2200);
+    } catch {
+      setCopiedBankField('');
+    }
   };
 
   // ==========================================================================
@@ -228,7 +455,7 @@ export default function ToursTehuacanApp() {
       ctx.lineWidth = 2.4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = '#0f172a';
+      ctx.strokeStyle = '#111111';
     }
   }, [step]);
 
@@ -302,7 +529,6 @@ export default function ToursTehuacanApp() {
       const fileExt = receiptFile.name.split('.').pop() || 'jpg';
       const filePath = `${folio}_${Date.now()}.${fileExt}`;
 
-      // 1. Subir imagen del comprobante al bucket 'comprobantes'
       const { error: uploadError } = await supabase.storage
         .from('comprobantes')
         .upload(filePath, receiptFile, {
@@ -314,29 +540,44 @@ export default function ToursTehuacanApp() {
         throw new Error(`Error al subir comprobante: ${uploadError.message}`);
       }
 
-      // 2. Obtener URL pública del comprobante
       const { data: publicUrlData } = supabase.storage
         .from('comprobantes')
         .getPublicUrl(filePath);
 
       const receiptUrl = publicUrlData.publicUrl;
       const signatureData = canvasRef.current.toDataURL('image/png');
-      const totalAmount = Number(selectedTour.price) * Number(passengers);
-      const depositAmount = Number(selectedTour.deposit) * Number(passengers);
+
+      const formattedSeatNames = clientForm.seatNamesList
+        .map((n, idx) => `Asiento ${idx + 1}: ${n.trim() || 'Por asignar'}`)
+        .join(' | ');
+
+      const formattedChildren = hasChildren
+        ? `${childrenCount} niño(a)(s) — Edades: ${childrenAges
+            .slice(0, childrenCount)
+            .map((a) => `${a || '?'} años`)
+            .join(', ')} (Hasta 10 años en asiento = precio cliente; hasta 3 años en piernas sin costo, sin entradas)`
+        : 'No viajan niños';
+
+      const idCheck = validateCurpOrIne(clientForm.idNumber, clientForm.name);
 
       const payload = {
         folio,
         tour_id: selectedTour.id,
         tour_title: selectedTour.title,
         tour_date: selectedTour.date,
-        passengers: Number(passengers),
-        total_amount: totalAmount,
-        deposit_amount: depositAmount,
+        passengers: Number(seatsCount),
+        total_amount: pricing.totalAmount,
+        deposit_amount: pricing.depositAmount,
         client_name: clientForm.name.trim(),
         client_email: clientForm.email.trim(),
         client_phone: clientForm.phone.trim(),
-        client_id_number: clientForm.idNumber.trim().toUpperCase(),
-        companions: clientForm.companions.trim(),
+        client_id_number: idCheck.normalized || clientForm.idNumber.trim().toUpperCase(),
+        companions: formattedSeatNames,
+        seat_names: formattedSeatNames,
+        emergency_contact: clientForm.emergencyContact.trim(),
+        children_info: formattedChildren,
+        promo_code_used: appliedCode ? appliedCode.code : 'PRECIO NORMAL',
+        applied_unit_price: pricing.unitPrice,
         receipt_url: receiptUrl,
         signature_data: signatureData,
         status: 'pending',
@@ -344,7 +585,6 @@ export default function ToursTehuacanApp() {
         user_agent: navigator.userAgent
       };
 
-      // 3. Insertar registro en la tabla 'reservations'
       const { error: insertError } = await supabase
         .from('reservations')
         .insert([payload]);
@@ -366,7 +606,7 @@ export default function ToursTehuacanApp() {
   };
 
   // ==========================================================================
-  // ACCIONES DE ADMINISTRADOR: RESERVACIONES Y CORREO
+  // ACCIONES DE ADMINISTRADOR: RESERVACIONES, EXCEL Y CORREO
   // ==========================================================================
   const updateReservationStatus = async (id, newStatus) => {
     const { error } = await supabase
@@ -407,34 +647,90 @@ export default function ToursTehuacanApp() {
     }
   };
 
+  const handleCopyAllForExcel = async () => {
+    const headers = [
+      'Folio',
+      'Fecha Registro',
+      'Viaje',
+      'Fecha Salida',
+      'Titular',
+      'Teléfono WhatsApp',
+      'Contacto Emergencia',
+      'Correo Electrónico',
+      'CURP / INE',
+      'No. Asientos',
+      'Nombres por Asiento',
+      'Niños y Edades',
+      'Código Aplicado',
+      'Total ($ MXN)',
+      'Anticipo ($ MXN)',
+      'Saldo ($ MXN)',
+      'Estado'
+    ];
+
+    const rows = filteredReservations.map((r) => {
+      const balance = Number(r.total_amount || 0) - Number(r.deposit_amount || 0);
+      return [
+        r.folio || '',
+        r.created_at ? new Date(r.created_at).toLocaleDateString('es-MX') : '',
+        r.tour_title || '',
+        r.tour_date || '',
+        r.client_name || '',
+        r.client_phone || '',
+        r.emergency_contact || '',
+        r.client_email || '',
+        r.client_id_number || '',
+        r.passengers || 0,
+        r.seat_names || r.companions || '',
+        r.children_info || 'No viajan niños',
+        r.promo_code_used || 'PRECIO NORMAL',
+        r.total_amount || 0,
+        r.deposit_amount || 0,
+        balance,
+        r.status || 'pending'
+      ]
+        .map((cell) => String(cell).replace(/\t|\n|\r/g, ' '))
+        .join('\t');
+    });
+
+    const tsv = [headers.join('\t'), ...rows].join('\n');
+    try {
+      await navigator.clipboard.writeText(tsv);
+      setCopiedExcelAll(true);
+      setTimeout(() => setCopiedExcelAll(false), 2500);
+    } catch {
+      setCopiedExcelAll(false);
+    }
+  };
+
   const buildConfirmationEmail = (res) => {
     const pendingBalance = Number(res.total_amount) - Number(res.deposit_amount);
-    const subject = `Confirmación de Reservación y Recibo de Pago - Folio ${res.folio} | Tours Tehuacán`;
+    const subject = `Confirmación de Reservación - Folio ${res.folio} | ${AGENCY_INFO.name}`;
     const body = `Hola ${res.client_name},
 
-¡Gracias por viajar con Tours Tehuacán! Confirmamos que hemos verificado exitosamente tu comprobante de anticipo y tu lugar ha quedado oficialmente reservado.
+¡Gracias por viajar con ${AGENCY_INFO.name}! (${AGENCY_INFO.slogan}). Una vez verificada tu información y comprobante de pago, aquí tienes los datos registrados de tu reservación:
 
 DETALLES DE TU RESERVACIÓN
 ----------------------------------------
 • Folio de Contrato: ${res.folio}
 • Viaje / Destino: ${res.tour_title}
 • Fecha de Salida: ${res.tour_date}
-• Número de Lugares: ${res.passengers} persona(s)
-${res.companions ? `• Acompañantes: ${res.companions}\n` : ''}
+• Número de Asientos: ${res.passengers}
+• Nombres por Asiento: ${res.seat_names || res.companions || 'Registrados'}
+• Niños: ${res.children_info || 'No viajan niños'}
+• Contacto de Emergencia: ${res.emergency_contact || 'Registrado'}
+• Código Aplicado: ${res.promo_code_used || 'PRECIO NORMAL'}
+
 RESUMEN DE PAGO
 ----------------------------------------
-• Costo Total del Paquete: $${Number(res.total_amount).toLocaleString('es-MX')} MXN
-• Anticipo Verificado: $${Number(res.deposit_amount).toLocaleString('es-MX')} MXN
-• Saldo Pendiente a Liquidar antes de abordar: $${pendingBalance.toLocaleString('es-MX')} MXN
+• Total Calculado: $${Number(res.total_amount).toLocaleString('es-MX')} MXN
+• Anticipo Reportado: $${Number(res.deposit_amount).toLocaleString('es-MX')} MXN
+• Saldo Pendiente: $${pendingBalance.toLocaleString('es-MX')} MXN
 
-RESPALDO LEGAL Y CONTRATO
-----------------------------------------
-Tu Contrato de Prestación de Servicios Turísticos firmado digitalmente bajo el folio ${res.folio} se encuentra resguardado en nuestro sistema conforme al Art. 89 del Código de Comercio.
+Para cualquier duda o seguimiento, contáctanos por llamada o WhatsApp al ${AGENCY_INFO.phone} o al correo ${AGENCY_INFO.email}.
 
-Cualquier duda sobre el punto de abordaje en Tehuacán u horarios, contáctanos vía WhatsApp al ${AGENCY_BANK_INFO.whatsapp}.
-
-¡Nos vemos pronto!
-Equipo de Tours Tehuacán`;
+¡Saludos cordiales!
+${AGENCY_INFO.name} (RNT: ${AGENCY_INFO.rnt})`;
 
     return { subject, body };
   };
@@ -450,6 +746,7 @@ Equipo de Tours Tehuacán`;
       date: '',
       duration: '1 día (Ida y vuelta)',
       price: '',
+      client_price: '',
       deposit: '',
       spots: 15,
       active: true,
@@ -469,6 +766,7 @@ Equipo de Tours Tehuacán`;
       date: tour.date,
       duration: tour.duration,
       price: tour.price,
+      client_price: tour.client_price ?? tour.price,
       deposit: tour.deposit,
       spots: tour.spots,
       active: tour.active,
@@ -485,12 +783,19 @@ Equipo de Tours Tehuacán`;
       .map((item) => item.trim())
       .filter(Boolean);
 
+    const normalPriceNum = Number(tourForm.price);
+    const clientPriceNum =
+      tourForm.client_price !== '' && !Number.isNaN(Number(tourForm.client_price))
+        ? Number(tourForm.client_price)
+        : normalPriceNum;
+
     const tourPayload = {
       title: tourForm.title.trim(),
       destination: tourForm.destination.trim(),
       date: tourForm.date.trim(),
       duration: tourForm.duration.trim(),
-      price: Number(tourForm.price),
+      price: normalPriceNum,
+      client_price: clientPriceNum,
       deposit: Number(tourForm.deposit),
       spots: Number(tourForm.spots),
       active: Boolean(tourForm.active),
@@ -533,102 +838,117 @@ Equipo de Tours Tehuacán`;
     clientName,
     clientId,
     clientPhone,
+    emergencyContact,
     clientEmail,
-    companions,
+    seatNamesText,
+    childrenText,
+    promoUsed,
     tourTitle,
     tourDate,
-    passengersCount,
+    seatsCountVal,
     total,
     deposit,
     signatureImg,
     userAgentStr
   }) => (
-    <div className="bg-white border border-slate-300 rounded-xl p-6 sm:p-8 text-slate-800 text-xs sm:text-sm leading-relaxed space-y-4 shadow-sm print:shadow-none print:border-none">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-200 pb-4 gap-2">
-        <div>
-          <h3 className="text-base sm:text-lg font-bold text-slate-900 uppercase tracking-wide">
-            Contrato de Prestación de Servicios Turísticos
-          </h3>
-          <p className="text-slate-500 text-xs">
-            Tours Tehuacán • {AGENCY_BANK_INFO.address} • Tel: {AGENCY_BANK_INFO.whatsapp}
-          </p>
+    <div className="bg-white border border-slate-300 rounded-2xl p-6 sm:p-8 text-[#111111] text-xs sm:text-sm leading-relaxed space-y-4 shadow-sm print:shadow-none print:border-none">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-200 pb-4 gap-3">
+        <div className="flex items-center gap-3">
+          <img
+            src={AGENCY_INFO.logoSrc}
+            alt={AGENCY_INFO.name}
+            className="h-14 w-auto object-contain rounded-lg bg-white p-1 border border-slate-200"
+          />
+          <div>
+            <h3 className="text-base sm:text-lg font-extrabold text-[#1F4FBE] uppercase tracking-wide">
+              Contrato de Prestación de Servicios Turísticos
+            </h3>
+            <p className="text-[#5A6470] text-xs">
+              {AGENCY_INFO.name} • RNT: {AGENCY_INFO.rnt} • {AGENCY_INFO.address}
+            </p>
+            <p className="text-[#5A6470] text-xs">
+              Tel / WhatsApp: {AGENCY_INFO.phone} • Correo: {AGENCY_INFO.email}
+            </p>
+          </div>
         </div>
         <div className="text-left sm:text-right">
-          <span className="inline-block bg-slate-100 text-slate-800 font-mono font-bold px-3 py-1 rounded text-xs">
+          <span className="inline-block bg-[#EAF6FD] text-[#1F4FBE] font-mono font-bold px-3 py-1 rounded-lg text-xs border border-[#5AB4E6]/40">
             FOLIO: {folio}
           </span>
-          <p className="text-slate-500 text-xs mt-1">Fecha: {dateStr}</p>
+          <p className="text-[#5A6470] text-xs mt-1">Fecha: {dateStr}</p>
         </div>
       </div>
 
       <p>
-        <strong>DECLARACIONES Y PARTES:</strong> Celebran el presente contrato por una parte{' '}
-        <strong>TOURS TEHUACÁN</strong> (en adelante &ldquo;LA AGENCIA&rdquo;) y por la otra{' '}
-        <strong>{clientName || '[NOMBRE DEL TITULAR]'}</strong>, identificado con{' '}
-        <strong>{clientId || '[INE/CURP]'}</strong>, teléfono{' '}
-        <strong>{clientPhone || '[TELÉFONO]'}</strong> y correo electrónico{' '}
-        <strong>{clientEmail || '[CORREO]'}</strong> (en adelante &ldquo;EL CLIENTE&rdquo;),
-        sujetándose al tenor de las siguientes cláusulas:
+        <strong>PARTES:</strong> Celebran el presente contrato por una parte{' '}
+        <strong>{AGENCY_INFO.name}</strong> (en adelante &ldquo;LA AGENCIA&rdquo;) y por la
+        otra <strong>{clientName || '[NOMBRE DEL TITULAR]'}</strong>, con identificador{' '}
+        <strong>{clientId || '[CURP / CLAVE DE ELECTOR INE]'}</strong>, teléfono para grupo de
+        WhatsApp <strong>{clientPhone || '[TELÉFONO]'}</strong>, contacto de emergencia{' '}
+        <strong>{emergencyContact || '[CONTACTO DE EMERGENCIA]'}</strong> y correo electrónico{' '}
+        <strong>{clientEmail || '[CORREO]'}</strong> (en adelante &ldquo;EL CLIENTE&rdquo;).
       </p>
 
-      <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+      <div className="bg-[#F4F6F8] p-4 rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
         <div>
-          <span className="text-slate-500 block">Servicio / Tour Contratado:</span>
-          <strong className="text-slate-900">{tourTitle}</strong>
+          <span className="text-[#5A6470] block">Servicio / Tour Contratado:</span>
+          <strong className="text-[#111111]">{tourTitle}</strong>
         </div>
         <div>
-          <span className="text-slate-500 block">Fecha de Salida Programada:</span>
-          <strong className="text-slate-900">{tourDate}</strong>
+          <span className="text-[#5A6470] block">Fecha de Salida Programada:</span>
+          <strong className="text-[#111111]">{tourDate}</strong>
         </div>
         <div>
-          <span className="text-slate-500 block">Lugares Reservados:</span>
-          <strong className="text-slate-900">{passengersCount} pasajero(s)</strong>
+          <span className="text-[#5A6470] block">No. de Asientos:</span>
+          <strong className="text-[#111111]">{seatsCountVal} asiento(s)</strong>
         </div>
         <div>
-          <span className="text-slate-500 block">Acompañantes Registrados:</span>
-          <strong className="text-slate-900">{companions || 'Ninguno'}</strong>
+          <span className="text-[#5A6470] block">Tarifa / Código Aplicado:</span>
+          <strong className="text-[#1F4FBE]">{promoUsed || 'PRECIO NORMAL'}</strong>
+        </div>
+        <div className="sm:col-span-2">
+          <span className="text-[#5A6470] block">Nombre por Asiento:</span>
+          <strong className="text-[#111111]">{seatNamesText || 'Por asignar'}</strong>
+        </div>
+        <div className="sm:col-span-2">
+          <span className="text-[#5A6470] block">Detalle de Niños:</span>
+          <strong className="text-[#111111]">{childrenText || 'No viajan niños'}</strong>
         </div>
         <div>
-          <span className="text-slate-500 block">Importe Total / Anticipo Reportado:</span>
-          <strong className="text-slate-900">
+          <span className="text-[#5A6470] block">Total / Anticipo Reportado:</span>
+          <strong className="text-[#111111]">
             ${Number(total).toLocaleString('es-MX')} MXN / Anticipo: $
             {Number(deposit).toLocaleString('es-MX')} MXN
           </strong>
         </div>
         <div>
-          <span className="text-slate-500 block">Saldo Pendiente a Liquidar:</span>
-          <strong className="text-emerald-700">
+          <span className="text-[#5A6470] block">Saldo Pendiente a Liquidar:</span>
+          <strong className="text-[#2E9E5B]">
             ${(Number(total) - Number(deposit)).toLocaleString('es-MX')} MXN
           </strong>
         </div>
       </div>
 
-      <div className="space-y-2 text-xs text-slate-700">
+      <div className="space-y-2 text-xs text-[#111111]">
         <p>
-          <strong>PRIMERA (OBJETO):</strong> LA AGENCIA se compromete a prestar los servicios
-          turísticos descritos en el itinerario oficial del viaje seleccionado, saliendo desde
-          el punto acordado en Tehuacán, Puebla.
+          <strong>PRIMERA (OBJETO):</strong> LA AGENCIA prestará los servicios turísticos
+          correspondientes al viaje seleccionado, con salida desde Tehuacán, Puebla.
         </p>
         <p>
-          <strong>SEGUNDA (PAGOS Y LIQUIDACIÓN):</strong> El apartado de lugares se realiza
-          mediante el anticipo estipulado, sujeto a validación bancaria del comprobante adjunto.
-          El saldo restante deberá liquidarse en su totalidad antes de abordar la unidad el día
-          de salida.
+          <strong>SEGUNDA (PAGOS Y MENORES):</strong> El apartado queda sujeto a validación del
+          comprobante de pago. Los niños de hasta 10 años ocupando asiento pagan tarifa de
+          cliente; los niños de hasta 3 años viajando en piernas no pagan y no incluyen costos de
+          entradas. El saldo restante deberá liquidarse antes de abordar.
         </p>
         <p>
-          <strong>TERCERA (CANCELACIONES Y PUNTUALIDAD):</strong> En caso de cancelación por
-          parte de EL CLIENTE o inasistencia a la hora de salida programada (tolerancia máxima de
-          15 minutos), los anticipos no son reembolsables debido a compromisos previos de
-          transporte y hospedaje, pudiendo transferir su lugar a otra persona previo aviso de 48
-          horas.
+          <strong>TERCERA (CANCELACIONES Y PUNTUALIDAD):</strong> Los anticipos no son
+          reembolsables ante cancelaciones o inasistencia a la hora de salida programada.
         </p>
         <p>
-          <strong>CUARTA (VALIDEZ DE FIRMA ELECTRÓNICA - ART. 89 CÓDIGO DE COMERCIO):</strong>{' '}
-          Ambas partes acuerdan y reconocen expresamente que la firma autógrafa digitalizada
-          plasmada en este documento electrónico, vinculada al comprobante de transferencia e
-          identificación de EL CLIENTE, produce los mismos efectos jurídicos y fuerza obligatoria
-          que la firma autógrafa en papel, conforme a los artículos 89 y 93 del Código de Comercio
-          y el artículo 1803 del Código Civil Federal.
+          <strong>CUARTA (FIRMA ELECTRÓNICA - ART. 89 CÓDIGO DE COMERCIO):</strong> La firma
+          autógrafa digitalizada en este documento electrónico produce plena validez y fuerza
+          obligatoria conforme a los artículos 89 y 93 del Código de Comercio y 1803 del Código
+          Civil Federal.
         </p>
       </div>
 
@@ -636,10 +956,12 @@ Equipo de Tours Tehuacán`;
         <div className="pt-4 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-6 items-end">
           <div className="text-center">
             <div className="h-20 flex items-center justify-center border-b border-slate-400 mb-1">
-              <span className="font-serif italic text-lg text-slate-700">Tours Tehuacán</span>
+              <span className="font-serif italic text-lg text-[#1F4FBE]">
+                {AGENCY_INFO.name}
+              </span>
             </div>
-            <p className="text-xs font-semibold text-slate-700">POR LA AGENCIA</p>
-            <p className="text-[11px] text-slate-500">Representación Autorizada</p>
+            <p className="text-xs font-semibold text-[#111111]">POR LA AGENCIA</p>
+            <p className="text-[11px] text-[#5A6470]">RNT: {AGENCY_INFO.rnt}</p>
           </div>
           <div className="text-center">
             <div className="h-20 flex items-center justify-center border-b border-slate-400 mb-1">
@@ -649,17 +971,19 @@ Equipo de Tours Tehuacán`;
                 className="max-h-16 object-contain"
               />
             </div>
-            <p className="text-xs font-semibold text-slate-700">
+            <p className="text-xs font-semibold text-[#111111]">
               {clientName} ({clientId})
             </p>
-            <p className="text-[11px] text-slate-500">Firma Electrónica Autógrafa del Titular</p>
+            <p className="text-[11px] text-[#5A6470]">
+              Firma Electrónica Autógrafa del Titular
+            </p>
           </div>
         </div>
       )}
 
       {signatureImg && (
-        <div className="bg-slate-100 p-3 rounded text-[11px] text-slate-500 font-mono break-all">
-          <strong>SELLO DE AUDITORÍA DIGITAL:</strong> Folio {folio} • Timestamp: {dateStr} •
+        <div className="bg-[#F4F6F8] p-3 rounded-xl text-[11px] text-[#5A6470] font-mono break-all">
+          <strong>SELLO DE AUDITORÍA DIGITAL:</strong> Folio {folio} • Fecha: {dateStr} •
           Dispositivo: {userAgentStr || 'Navegador Web'}
         </div>
       )}
@@ -672,50 +996,43 @@ Equipo de Tours Tehuacán`;
   );
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
+    <div className="min-h-screen bg-[#F4F6F8] text-[#111111] font-sans flex flex-col">
       {/* ====================================================================
-          BARRA SUPERIOR DE NAVEGACIÓN
+          BARRA SUPERIOR DE NAVEGACIÓN (SIN BOTÓN DE AGENCIA ARRIBA)
          ==================================================================== */}
-      <header className="bg-slate-900 text-white shadow-md sticky top-0 z-30 print:hidden">
-        <div className="max-w-6xl mx-auto px-4 py-3.5 flex items-center justify-between">
+      <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-30 print:hidden">
+        <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between gap-3">
           <div
             onClick={() => {
               setView('client');
               setStep(1);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className="flex items-center gap-2.5 cursor-pointer"
+            className="flex items-center gap-3 cursor-pointer"
           >
-            <div className="bg-emerald-500 text-slate-950 p-2 rounded-lg font-bold">
-              <MapPin className="w-5 h-5" />
-            </div>
+            <img
+              src={AGENCY_INFO.logoSrc}
+              alt={AGENCY_INFO.name}
+              className="h-12 sm:h-14 w-auto object-contain rounded-lg"
+            />
             <div>
-              <h1 className="font-bold text-base sm:text-lg leading-tight tracking-tight">
-                Tours Tehuacán
-              </h1>
-              <p className="text-[11px] text-slate-400">
-                Portal Oficial de Reservaciones y Contratos
+              <p className="text-xs sm:text-sm font-extrabold text-[#1F4FBE] leading-tight">
+                ¡Acompáñanos a tu próxima aventura!
+              </p>
+              <p className="text-[11px] text-[#5A6470]">
+                WhatsApp {AGENCY_INFO.phone} • RNT {AGENCY_INFO.rnt}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {view === 'client' ? (
-              <button
-                onClick={() => setView('admin')}
-                className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg border border-slate-700 transition"
-              >
-                <Lock className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Acceso Agencia</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => setView('client')}
-                className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-lg font-medium transition"
-              >
-                <span>Ver Vista Cliente</span>
-              </button>
-            )}
-          </div>
+          {view === 'admin' && (
+            <button
+              onClick={() => setView('client')}
+              className="flex items-center gap-1.5 text-xs bg-[#F58220] hover:bg-[#e07314] text-white px-3.5 py-2 rounded-xl font-bold transition shadow-sm"
+            >
+              <span>Ver Vista Cliente</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -723,7 +1040,7 @@ Equipo de Tours Tehuacán`;
           VISTA PÚBLICA PARA CLIENTES
          ==================================================================== */}
       {view === 'client' && (
-        <main className="max-w-4xl mx-auto px-4 py-6 sm:py-10">
+        <main className="max-w-4xl mx-auto px-4 py-6 sm:py-10 flex-1 w-full">
           {/* Indicador de pasos */}
           {step < 4 && (
             <div className="mb-8 print:hidden">
@@ -738,15 +1055,15 @@ Equipo de Tours Tehuacán`;
                       <div
                         className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm transition ${
                           step >= item.num
-                            ? 'bg-emerald-600 text-white shadow-sm'
-                            : 'bg-slate-200 text-slate-500'
+                            ? 'bg-[#1F4FBE] text-white shadow-sm'
+                            : 'bg-slate-200 text-[#5A6470]'
                         }`}
                       >
                         {step > item.num ? <Check className="w-5 h-5" /> : item.num}
                       </div>
                       <span
-                        className={`text-xs mt-1.5 font-medium ${
-                          step >= item.num ? 'text-slate-900' : 'text-slate-400'
+                        className={`text-xs mt-1.5 font-semibold ${
+                          step >= item.num ? 'text-[#1F4FBE]' : 'text-[#5A6470]'
                         }`}
                       >
                         {item.label}
@@ -754,8 +1071,8 @@ Equipo de Tours Tehuacán`;
                     </div>
                     {idx < 2 && (
                       <div
-                        className={`flex-1 h-1 mx-2 rounded ${
-                          step > item.num ? 'bg-emerald-500' : 'bg-slate-200'
+                        className={`flex-1 h-1 mx-2 rounded-full ${
+                          step > item.num ? 'bg-[#5AB4E6]' : 'bg-slate-200'
                         }`}
                       />
                     )}
@@ -765,33 +1082,34 @@ Equipo de Tours Tehuacán`;
             </div>
           )}
 
-          {/* PASO 1: CATÁLOGO DE TOURS */}
+          {/* PASO 1: CATÁLOGO DE TOURS (SOLO PRECIO NORMAL PÚBLICO, SIN LUGARES DISP.) */}
           {step === 1 && (
             <div className="space-y-6">
-              <div className="text-center max-w-xl mx-auto">
-                <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">
-                  Próximas Salidas desde Tehuacán
+              <div className="bg-gradient-to-r from-[#EAF6FD] via-white to-[#EAF6FD] border border-[#5AB4E6]/40 rounded-3xl p-6 sm:p-8 text-center">
+                <span className="inline-block text-xs font-extrabold uppercase tracking-wider text-[#1F4FBE] bg-white px-3.5 py-1 rounded-full border border-[#5AB4E6]/40 mb-2">
+                  {AGENCY_INFO.slogan}
+                </span>
+                <h2 className="text-2xl sm:text-3xl font-extrabold text-[#1F4FBE] uppercase tracking-tight">
+                  ¡Acompáñanos en Nuestros Próximos Viajes!
                 </h2>
-                <p className="text-slate-600 text-sm mt-1">
-                  Selecciona el destino de tu preferencia para apartar tus lugares y generar tu
-                  contrato digital.
+                <p className="text-[#5A6470] text-sm mt-1.5 max-w-xl mx-auto">
+                  Lánzate con nosotros: elige tu viaje, aparta con tu comprobante y firma tu
+                  contrato digital en minutos.
                 </p>
               </div>
 
               {loadingTours ? (
-                <div className="flex flex-col items-center justify-center py-16 text-slate-500">
-                  <Loader2 className="w-8 h-8 animate-spin text-emerald-600 mb-2" />
+                <div className="flex flex-col items-center justify-center py-16 text-[#5A6470]">
+                  <Loader2 className="w-8 h-8 animate-spin text-[#1F4FBE] mb-2" />
                   <p className="text-sm">Cargando viajes disponibles...</p>
                 </div>
               ) : activeTours.length === 0 ? (
-                <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
-                  <Sparkles className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
-                  <h3 className="font-bold text-slate-900 text-lg">
-                    Aún no hay viajes publicados
+                <div className="bg-white border border-slate-200 rounded-3xl p-10 text-center">
+                  <h3 className="font-bold text-[#1F4FBE] text-lg">
+                    Pronto publicaremos nuevas salidas
                   </h3>
-                  <p className="text-slate-500 text-sm mt-1">
-                    Si eres el administrador, entra a <strong>Acceso Agencia</strong> para
-                    publicar tus primeros tours en la nube.
+                  <p className="text-[#5A6470] text-sm mt-1">
+                    Estamos preparando nuevos destinos desde Tehuacán.
                   </p>
                 </div>
               ) : (
@@ -799,9 +1117,9 @@ Equipo de Tours Tehuacán`;
                   {activeTours.map((tour) => (
                     <div
                       key={tour.id}
-                      className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition flex flex-col"
+                      className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition flex flex-col"
                     >
-                      <div className="relative h-48 bg-slate-200">
+                      <div className="relative h-52 bg-slate-200">
                         <img
                           src={
                             tour.image ||
@@ -810,23 +1128,22 @@ Equipo de Tours Tehuacán`;
                           alt={tour.title}
                           className="w-full h-full object-cover"
                         />
-                        <span className="absolute top-3 left-3 bg-slate-900/85 text-white text-xs font-medium px-3 py-1 rounded-full backdrop-blur-sm">
+                        <span className="absolute top-3 left-3 bg-[#1F4FBE] text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm">
                           {tour.duration}
-                        </span>
-                        <span className="absolute bottom-3 right-3 bg-emerald-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow">
-                          {tour.spots} lugares disp.
                         </span>
                       </div>
 
                       <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
                         <div>
-                          <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold mb-1">
-                            <Calendar className="w-3.5 h-3.5" />
+                          <div className="flex items-center gap-1.5 text-xs text-[#5A6470] font-semibold mb-1">
+                            <Calendar className="w-3.5 h-3.5 text-[#1F4FBE]" />
                             <span>{tour.date}</span>
                           </div>
-                          <h3 className="text-lg font-bold text-slate-900">{tour.title}</h3>
-                          <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-                            <MapPin className="w-3.5 h-3.5" /> {tour.destination}
+                          <h3 className="text-lg font-extrabold text-[#1F4FBE] uppercase">
+                            {tour.title}
+                          </h3>
+                          <p className="text-xs text-[#5A6470] flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3.5 h-3.5 text-[#5AB4E6]" /> {tour.destination}
                           </p>
 
                           {Array.isArray(tour.includes) && tour.includes.length > 0 && (
@@ -834,9 +1151,9 @@ Equipo de Tours Tehuacán`;
                               {tour.includes.slice(0, 3).map((inc, i) => (
                                 <li
                                   key={i}
-                                  className="text-xs text-slate-600 flex items-center gap-1.5"
+                                  className="text-xs text-[#111111] flex items-center gap-1.5"
                                 >
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-[#2E9E5B] shrink-0" />
                                   <span>{inc}</span>
                                 </li>
                               ))}
@@ -844,28 +1161,33 @@ Equipo de Tours Tehuacán`;
                           )}
                         </div>
 
-                        <div className="pt-4 border-t border-slate-100 flex items-center justify-between">
-                          <div>
-                            <span className="text-xs text-slate-500 block">
-                              Precio por persona
+                        <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+                          <div className="bg-[#F58220]/10 border border-[#F58220]/30 rounded-2xl px-3.5 py-2">
+                            <span className="text-[11px] text-[#5A6470] font-semibold block">
+                              Precio normal por persona
                             </span>
-                            <span className="text-xl font-extrabold text-slate-900">
+                            <span className="text-xl font-black text-[#F58220]">
                               ${Number(tour.price).toLocaleString('es-MX')}{' '}
-                              <span className="text-xs font-normal text-slate-500">MXN</span>
+                              <span className="text-xs font-semibold text-[#111111]">MXN</span>
                             </span>
-                            <span className="text-[11px] text-emerald-700 font-medium block">
-                              Aparta con ${Number(tour.deposit).toLocaleString('es-MX')} MXN
+                            <span className="text-[11px] text-[#2E9E5B] font-semibold block">
+                              Anticipo: ${Number(tour.deposit).toLocaleString('es-MX')} MXN por
+                              asiento
                             </span>
                           </div>
 
                           <button
                             onClick={() => {
                               setSelectedTour(tour);
-                              setPassengers(1);
+                              setSeatsCount(1);
+                              setAppliedCode(null);
+                              setPromoInput('');
+                              setPromoFeedback('');
+                              setClientForm((prev) => ({ ...prev, seatNamesList: [''] }));
                               setStep(2);
                               window.scrollTo({ top: 0, behavior: 'smooth' });
                             }}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition shadow-sm"
+                            className="bg-[#F58220] hover:bg-[#e07314] text-white font-bold text-sm px-5 py-3 rounded-2xl flex items-center gap-1.5 transition shadow-sm shrink-0"
                           >
                             <span>Reservar</span>
                             <ChevronRight className="w-4 h-4" />
@@ -879,114 +1201,208 @@ Equipo de Tours Tehuacán`;
             </div>
           )}
 
-          {/* PASO 2: DATOS DEL CLIENTE Y COMPROBANTE DE ANTICIPO */}
+          {/* PASO 2: DATOS COMPLETOS, CÓDIGO PREFERENCIAL, NIÑOS Y COMPROBANTE */}
           {step === 2 && selectedTour && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-sm space-y-6">
               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
                 <div>
-                  <span className="text-xs font-semibold text-emerald-600 uppercase">
+                  <span className="text-xs font-extrabold text-[#F58220] uppercase">
                     Paso 2 de 3
                   </span>
-                  <h2 className="text-xl font-bold text-slate-900">
-                    Datos del Titular y Comprobante
+                  <h2 className="text-xl font-extrabold text-[#1F4FBE] uppercase">
+                    Datos de Reservación y Comprobante
                   </h2>
                 </div>
                 <button
                   onClick={() => setStep(1)}
-                  className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                  className="text-xs text-[#5A6470] hover:text-[#1F4FBE] font-semibold flex items-center gap-1"
                 >
                   <ChevronLeft className="w-4 h-4" /> Cambiar viaje
                 </button>
               </div>
 
-              {/* Resumen económico */}
-              <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              {/* Viaje elegido + No. de asientos */}
+              <div className="bg-[#EAF6FD] border border-[#5AB4E6]/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h3 className="font-bold text-slate-900">{selectedTour.title}</h3>
-                  <p className="text-xs text-slate-600">Salida: {selectedTour.date}</p>
+                  <h3 className="font-extrabold text-[#1F4FBE]">{selectedTour.title}</h3>
+                  <p className="text-xs text-[#5A6470]">
+                    {selectedTour.destination} • Salida: {selectedTour.date}
+                  </p>
                 </div>
                 <div className="flex items-center gap-3">
-                  <label className="text-xs font-semibold text-slate-700">Lugares:</label>
+                  <label className="text-xs font-bold text-[#111111]">
+                    No. de asientos:
+                  </label>
                   <select
-                    value={passengers}
-                    onChange={(e) => setPassengers(Number(e.target.value))}
-                    className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-900"
+                    value={seatsCount}
+                    onChange={(e) => handleSeatsChange(Number(e.target.value))}
+                    className="bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-sm font-bold text-[#111111]"
                   >
-                    {[...Array(Math.min(15, selectedTour.spots || 15))].map((_, idx) => (
+                    {[...Array(20)].map((_, idx) => (
                       <option key={idx + 1} value={idx + 1}>
-                        {idx + 1} {idx === 0 ? 'persona' : 'personas'}
+                        {idx + 1} {idx === 0 ? 'asiento' : 'asientos'}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-900 text-white p-4 rounded-xl">
+              {/* Código especial / preferencial (oculta precio cliente hasta validar código) */}
+              <div className="bg-[#F4F6F8] border border-slate-200 rounded-2xl p-4 space-y-2">
+                <label className="text-xs font-bold text-[#1F4FBE] flex items-center gap-1.5">
+                  <Tag className="w-4 h-4 text-[#F58220]" />
+                  ¿Cuentas con código especial o preferencial para clientes?
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    placeholder="Ingresa tu código (opcional)"
+                    value={promoInput}
+                    onChange={(e) => setPromoInput(e.target.value)}
+                    className="flex-1 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs uppercase outline-none focus:ring-2 focus:ring-[#1F4FBE]"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyPromoCode}
+                    className="bg-[#1F4FBE] hover:bg-[#173d96] text-white text-xs font-bold px-4 py-2 rounded-xl transition"
+                  >
+                    Aplicar código
+                  </button>
+                </div>
+                {promoFeedback && (
+                  <p
+                    className={`text-xs font-semibold ${
+                      appliedCode ? 'text-[#2E9E5B]' : 'text-[#5A6470]'
+                    }`}
+                  >
+                    {promoFeedback}
+                  </p>
+                )}
+              </div>
+
+              {/* Resumen de importes */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-[#1F4FBE] text-white p-4 rounded-2xl">
                 <div>
-                  <span className="text-xs text-slate-400 block">Total del Paquete</span>
-                  <span className="text-lg font-bold">
-                    ${(Number(selectedTour.price) * passengers).toLocaleString('es-MX')} MXN
+                  <span className="text-xs text-[#EAF6FD] block">
+                    Total ({seatsCount} asiento{seatsCount > 1 ? 's' : ''})
+                  </span>
+                  <span className="text-lg font-extrabold">
+                    ${pricing.totalAmount.toLocaleString('es-MX')} MXN
                   </span>
                 </div>
-                <div>
-                  <span className="text-xs text-emerald-400 block">
-                    Anticipo Requerido para Apartar
+                <div className="bg-[#F58220] rounded-xl p-3">
+                  <span className="text-xs text-white/95 font-semibold block">
+                    Anticipo a Depositar
                   </span>
-                  <span className="text-xl font-extrabold text-emerald-400">
-                    ${(Number(selectedTour.deposit) * passengers).toLocaleString('es-MX')} MXN
+                  <span className="text-xl font-black text-white">
+                    ${pricing.depositAmount.toLocaleString('es-MX')} MXN
                   </span>
                 </div>
               </div>
 
-              {/* Datos bancarios para depósito */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-1.5">
-                <p className="font-bold text-slate-800 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4 text-emerald-600" />
-                  Datos para Transferencia o Depósito de Anticipo:
+              {/* Cuentas BANORTE con botón copiar */}
+              <div className="bg-[#F4F6F8] border border-slate-200 rounded-2xl p-4 text-xs space-y-2.5">
+                <p className="font-bold text-[#111111] flex items-center gap-1.5">
+                  <CreditCard className="w-4 h-4 text-[#1F4FBE]" />
+                  Cuenta Bancaria {AGENCY_INFO.bank} — Titular: {AGENCY_INFO.holder}
                 </p>
-                <p className="text-slate-600">
-                  <strong>Banco:</strong> {AGENCY_BANK_INFO.bank} • <strong>Titular:</strong>{' '}
-                  {AGENCY_BANK_INFO.holder}
-                </p>
-                <p className="text-slate-600 font-mono">
-                  <strong>CLABE:</strong> {AGENCY_BANK_INFO.clabe} • <strong>Tarjeta:</strong>{' '}
-                  {AGENCY_BANK_INFO.card}
-                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-[#5A6470] block">Cuenta CLABE</span>
+                      <strong className="font-mono text-[#111111] text-[11px] break-all">
+                        {AGENCY_INFO.clabe}
+                      </strong>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyBankText('clabe', AGENCY_INFO.clabe)}
+                      className="shrink-0 bg-[#EAF6FD] hover:bg-[#d8effc] text-[#1F4FBE] px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1"
+                    >
+                      {copiedBankField === 'clabe' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-[#2E9E5B]" /> Copiado
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" /> Copiar
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-[#5A6470] block">No. de Tarjeta</span>
+                      <strong className="font-mono text-[#111111] text-[11px] break-all">
+                        {AGENCY_INFO.card}
+                      </strong>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyBankText('card', AGENCY_INFO.card)}
+                      className="shrink-0 bg-[#EAF6FD] hover:bg-[#d8effc] text-[#1F4FBE] px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1"
+                    >
+                      {copiedBankField === 'card' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-[#2E9E5B]" /> Copiado
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" /> Copiar
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="text-[10px] text-[#5A6470] block">
+                        Cajero / Cuenta Banorte
+                      </span>
+                      <strong className="font-mono text-[#111111] text-[11px] break-all">
+                        {AGENCY_INFO.accountNumber}
+                      </strong>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyBankText('account', AGENCY_INFO.accountNumber)}
+                      className="shrink-0 bg-[#EAF6FD] hover:bg-[#d8effc] text-[#1F4FBE] px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1"
+                    >
+                      {copiedBankField === 'account' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-[#2E9E5B]" /> Copiado
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" /> Copiar
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
 
-              {/* Formulario */}
+              {/* Formulario de datos requeridos */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Nombre Completo del Titular *
+                  <label className="block text-xs font-bold text-[#111111] mb-1">
+                    Titular *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ej. María Fernanda López"
+                    placeholder="Nombre completo del titular"
                     value={clientForm.name}
                     onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })}
-                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-[#1F4FBE] outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Correo Electrónico (para recibir confirmación) *
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="cliente@correo.com"
-                    value={clientForm.email}
-                    onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
-                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Teléfono / WhatsApp (10 dígitos) *
+                  <label className="block text-xs font-bold text-[#111111] mb-1">
+                    Número de Teléfono (para grupo de WhatsApp) *
                   </label>
                   <input
                     type="tel"
@@ -994,65 +1410,174 @@ Equipo de Tours Tehuacán`;
                     placeholder="238 000 0000"
                     value={clientForm.phone}
                     onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })}
-                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-[#1F4FBE] outline-none"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Clave de Elector (INE) o CURP *
+                  <label className="block text-xs font-bold text-[#111111] mb-1">
+                    Contacto de emergencia (persona que NO asiste al viaje) *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Para validez legal del contrato"
-                    value={clientForm.idNumber}
-                    onChange={(e) => setClientForm({ ...clientForm, idNumber: e.target.value })}
-                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm uppercase focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="Nombre y teléfono de contacto externo"
+                    value={clientForm.emergencyContact}
+                    onChange={(e) =>
+                      setClientForm({ ...clientForm, emergencyContact: e.target.value })
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-[#1F4FBE] outline-none"
                   />
                 </div>
 
-                {passengers > 1 && (
-                  <div className="sm:col-span-2">
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Nombres de los Acompañantes ({passengers - 1} adicionales)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej. Juan Pérez, Sofía López"
-                      value={clientForm.companions}
-                      onChange={(e) =>
-                        setClientForm({ ...clientForm, companions: e.target.value })
-                      }
-                      className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                    />
+                <div>
+                  <label className="block text-xs font-bold text-[#111111] mb-1">
+                    CURP o Clave de Elector (INE) del Titular *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="18 caracteres (CURP o Clave de Elector)"
+                    value={clientForm.idNumber}
+                    onChange={(e) => setClientForm({ ...clientForm, idNumber: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm uppercase focus:ring-2 focus:ring-[#1F4FBE] outline-none"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-[#111111] mb-1">
+                    Correo electrónico (para recibir confirmación) *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="ejemplo@correo.com"
+                    value={clientForm.email}
+                    onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-[#1F4FBE] outline-none"
+                  />
+                  <p className="text-[11px] text-[#5A6470] mt-1">
+                    Después de enviada tu reservación, verificaremos todo y recibirás tu
+                    confirmación en este correo.
+                  </p>
+                </div>
+
+                {/* Nombre de cada persona por asiento */}
+                <div className="sm:col-span-2 bg-[#F4F6F8] border border-slate-200 rounded-2xl p-4 space-y-2.5">
+                  <label className="block text-xs font-bold text-[#1F4FBE]">
+                    Nombre de cada persona por asiento ({seatsCount}) *
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {clientForm.seatNamesList.map((seatName, idx) => (
+                      <div key={idx}>
+                        <span className="text-[11px] text-[#5A6470] block mb-0.5">
+                          Asiento {idx + 1}
+                        </span>
+                        <input
+                          type="text"
+                          required
+                          placeholder={`Nombre de pasajero en asiento ${idx + 1}`}
+                          value={seatName}
+                          onChange={(e) => {
+                            const updated = [...clientForm.seatNamesList];
+                            updated[idx] = e.target.value;
+                            setClientForm({ ...clientForm, seatNamesList: updated });
+                          }}
+                          className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#1F4FBE]"
+                        />
+                      </div>
+                    ))}
                   </div>
-                )}
+                </div>
+
+                {/* Sección de Niños */}
+                <div className="sm:col-span-2 bg-[#F4F6F8] border border-slate-200 rounded-2xl p-4 space-y-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={hasChildren}
+                      onChange={(e) => setHasChildren(e.target.checked)}
+                      className="w-4 h-4 accent-[#1F4FBE]"
+                    />
+                    <span className="text-xs font-bold text-[#111111]">
+                      ¿Viajan niños?
+                    </span>
+                  </label>
+                  <p className="text-[11px] text-[#5A6470]">
+                    Niños hasta 10 años ocupando asiento pagan tarifa de cliente. Niños hasta 3
+                    años viajando en piernas no pagan (no se incluyen costos de entradas).
+                  </p>
+
+                  {hasChildren && (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs font-bold text-[#111111]">
+                          ¿Cuántos niños?
+                        </label>
+                        <select
+                          value={childrenCount}
+                          onChange={(e) => handleChildrenCountChange(Number(e.target.value))}
+                          className="bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold"
+                        >
+                          {[1, 2, 3, 4, 5, 6].map((n) => (
+                            <option key={n} value={n}>
+                              {n} {n === 1 ? 'niño(a)' : 'niños(as)'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {childrenAges.slice(0, childrenCount).map((age, idx) => (
+                          <div key={idx}>
+                            <span className="text-[11px] text-[#5A6470] block mb-0.5">
+                              Edad niño/a {idx + 1} (años)
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              max="17"
+                              required
+                              placeholder="Ej. 5"
+                              value={age}
+                              onChange={(e) => {
+                                const next = [...childrenAges];
+                                next[idx] = e.target.value;
+                                setChildrenAges(next);
+                              }}
+                              className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-[#1F4FBE]"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
 
                 {/* Carga de Comprobante */}
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Sube la Captura o Foto de tu Comprobante de Anticipo *
+                  <label className="block text-xs font-bold text-[#111111] mb-1.5">
+                    Comprobante de depósito o transferencia *
                   </label>
-                  <label className="border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer bg-slate-50 transition">
+                  <label className="border-2 border-dashed border-slate-300 hover:border-[#1F4FBE] rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-[#F4F6F8] transition">
                     {receiptPreview ? (
                       <div className="text-center space-y-2">
                         <img
                           src={receiptPreview}
                           alt="Vista previa comprobante"
-                          className="max-h-44 mx-auto rounded-lg shadow-sm"
+                          className="max-h-44 mx-auto rounded-xl shadow-sm"
                         />
-                        <span className="text-xs text-emerald-700 font-semibold block">
+                        <span className="text-xs text-[#2E9E5B] font-bold block">
                           Comprobante cargado ({receiptFile?.name}) — Clic para cambiar
                         </span>
                       </div>
                     ) : (
                       <>
-                        <Upload className="w-8 h-8 text-slate-400 mb-2" />
-                        <span className="text-sm font-medium text-slate-700">
-                          Toca aquí para seleccionar imagen del comprobante
+                        <Upload className="w-8 h-8 text-[#1F4FBE] mb-2" />
+                        <span className="text-sm font-bold text-[#111111]">
+                          Toca aquí para seleccionar la imagen de tu comprobante
                         </span>
-                        <span className="text-xs text-slate-400 mt-0.5">
+                        <span className="text-xs text-[#5A6470] mt-0.5">
                           JPG, PNG o captura de pantalla (Máx. 8 MB)
                         </span>
                       </>
@@ -1068,7 +1593,7 @@ Equipo de Tours Tehuacán`;
               </div>
 
               {submitError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl flex items-center gap-2">
+                <div className="bg-red-50 border border-red-200 text-[#D92D20] text-xs p-3 rounded-xl flex items-center gap-2 font-medium">
                   <AlertCircle className="w-4 h-4 shrink-0" />
                   <span>{submitError}</span>
                 </div>
@@ -1079,26 +1604,53 @@ Equipo de Tours Tehuacán`;
                   onClick={() => {
                     if (
                       !clientForm.name.trim() ||
-                      !clientForm.email.includes('@') ||
                       !clientForm.phone.trim() ||
-                      !clientForm.idNumber.trim()
+                      !clientForm.emergencyContact.trim() ||
+                      !clientForm.email.includes('@')
                     ) {
                       setSubmitError(
-                        'Por favor completa todos los campos obligatorios (incluyendo un correo válido).'
+                        'Completa titular, teléfono de WhatsApp, contacto de emergencia y correo electrónico válido.'
                       );
                       return;
                     }
+
+                    const idValidation = validateCurpOrIne(
+                      clientForm.idNumber,
+                      clientForm.name
+                    );
+                    if (!idValidation.valid) {
+                      setSubmitError(idValidation.message);
+                      return;
+                    }
+
+                    const allSeatsNamed = clientForm.seatNamesList
+                      .slice(0, seatsCount)
+                      .every((n) => n.trim().length > 0);
+                    if (!allSeatsNamed) {
+                      setSubmitError('Escribe el nombre de cada persona por asiento.');
+                      return;
+                    }
+
+                    if (hasChildren) {
+                      const allAgesValid = childrenAges
+                        .slice(0, childrenCount)
+                        .every((a) => a !== '' && Number(a) >= 0 && Number(a) < 18);
+                      if (!allAgesValid) {
+                        setSubmitError('Indica la edad de cada niño(a) que viaja.');
+                        return;
+                      }
+                    }
+
                     if (!receiptFile) {
-                      setSubmitError(
-                        'Por favor adjunta la imagen del comprobante de anticipo.'
-                      );
+                      setSubmitError('Adjunta la imagen de tu comprobante de pago.');
                       return;
                     }
+
                     setSubmitError('');
                     setStep(3);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-6 py-3 rounded-xl flex items-center gap-2 transition shadow-sm"
+                  className="bg-[#F58220] hover:bg-[#e07314] text-white font-bold px-6 py-3 rounded-2xl flex items-center gap-2 transition shadow-sm"
                 >
                   <span>Generar Contrato para Firmar</span>
                   <ChevronRight className="w-4 h-4" />
@@ -1112,54 +1664,62 @@ Equipo de Tours Tehuacán`;
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs font-semibold text-emerald-600 uppercase">
+                  <span className="text-xs font-extrabold text-[#F58220] uppercase">
                     Paso 3 de 3
                   </span>
-                  <h2 className="text-xl font-bold text-slate-900">
+                  <h2 className="text-xl font-extrabold text-[#1F4FBE] uppercase">
                     Revisa tu Contrato y Firma Digitalmente
                   </h2>
                 </div>
                 <button
                   onClick={() => setStep(2)}
-                  className="text-xs text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                  className="text-xs text-[#5A6470] hover:text-[#1F4FBE] font-semibold flex items-center gap-1"
                 >
                   <ChevronLeft className="w-4 h-4" /> Editar datos
                 </button>
               </div>
 
-              {/* Vista previa del contrato */}
               {renderLegalContractDocument({
                 folio: 'VISTA PREVIA',
                 dateStr: new Date().toLocaleDateString('es-MX'),
                 clientName: clientForm.name,
-                clientId: clientForm.idNumber,
+                clientId: clientForm.idNumber.trim().toUpperCase(),
                 clientPhone: clientForm.phone,
+                emergencyContact: clientForm.emergencyContact,
                 clientEmail: clientForm.email,
-                companions: clientForm.companions,
+                seatNamesText: clientForm.seatNamesList
+                  .map((n, idx) => `Asiento ${idx + 1}: ${n.trim()}`)
+                  .join(' | '),
+                childrenText: hasChildren
+                  ? `${childrenCount} niño(a)(s) — Edades: ${childrenAges
+                      .slice(0, childrenCount)
+                      .map((a) => `${a} años`)
+                      .join(', ')}`
+                  : 'No viajan niños',
+                promoUsed: appliedCode ? appliedCode.code : 'PRECIO NORMAL',
                 tourTitle: selectedTour.title,
                 tourDate: selectedTour.date,
-                passengersCount: passengers,
-                total: Number(selectedTour.price) * passengers,
-                deposit: Number(selectedTour.deposit) * passengers,
+                seatsCountVal: seatsCount,
+                total: pricing.totalAmount,
+                deposit: pricing.depositAmount,
                 signatureImg: null
               })}
 
-              {/* Área de Firma Autógrafa */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 shadow-sm">
+              <div className="bg-white border border-slate-200 rounded-3xl p-6 space-y-4 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-bold text-slate-900">
-                    Dibuja tu Firma Autógrafa aquí (con tu dedo o mouse) *
+                  <label className="text-sm font-bold text-[#111111]">
+                    Firma Autógrafa del Titular (dedo o mouse) *
                   </label>
                   <button
                     type="button"
                     onClick={clearSignature}
-                    className="text-xs text-red-600 hover:underline font-medium"
+                    className="text-xs text-[#D92D20] hover:underline font-semibold"
                   >
                     Limpiar firma
                   </button>
                 </div>
 
-                <div className="border-2 border-slate-300 rounded-xl bg-slate-50 overflow-hidden touch-none">
+                <div className="border-2 border-slate-300 rounded-2xl bg-[#F4F6F8] overflow-hidden touch-none">
                   <canvas
                     ref={canvasRef}
                     onMouseDown={startDrawing}
@@ -1178,17 +1738,18 @@ Equipo de Tours Tehuacán`;
                     type="checkbox"
                     checked={acceptedTerms}
                     onChange={(e) => setAcceptedTerms(e.target.checked)}
-                    className="mt-1 w-4 h-4 accent-emerald-600"
+                    className="mt-1 w-4 h-4 accent-[#1F4FBE]"
                   />
-                  <span className="text-xs text-slate-700 leading-relaxed">
-                    He leído y acepto los términos del Contrato de Prestación de Servicios
-                    Turísticos y consiento expresamente el uso de mi firma electrónica autógrafa
-                    conforme al Art. 89 del Código de Comercio.
+                  <span className="text-xs text-[#111111] leading-relaxed">
+                    Acepto los términos del Contrato de Prestación de Servicios Turísticos y el
+                    uso de mi firma electrónica autógrafa conforme al Art. 89 del Código de
+                    Comercio. Entiendo que tras enviar se verificará todo y recibiré la
+                    confirmación en mi correo electrónico.
                   </span>
                 </label>
 
                 {submitError && (
-                  <div className="bg-red-50 border border-red-200 text-red-700 text-xs p-3 rounded-xl flex items-center gap-2">
+                  <div className="bg-red-50 border border-red-200 text-[#D92D20] text-xs p-3 rounded-xl flex items-center gap-2 font-medium">
                     <AlertCircle className="w-4 h-4 shrink-0" />
                     <span>{submitError}</span>
                   </div>
@@ -1197,12 +1758,12 @@ Equipo de Tours Tehuacán`;
                 <button
                   onClick={handleFinalizeReservation}
                   disabled={submitting}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white font-bold py-3.5 rounded-xl flex items-center justify-center gap-2 transition shadow-md"
+                  className="w-full bg-[#F58220] hover:bg-[#e07314] disabled:bg-slate-400 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition shadow-md"
                 >
                   {submitting ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Guardando contrato y comprobante en la nube...</span>
+                      <span>Guardando contrato y comprobante...</span>
                     </>
                   ) : (
                     <>
@@ -1218,18 +1779,18 @@ Equipo de Tours Tehuacán`;
           {/* PASO 4: CONFIRMACIÓN Y DESCARGA PDF */}
           {step === 4 && completedReservation && (
             <div className="space-y-6">
-              <div className="bg-emerald-600 text-white rounded-2xl p-6 sm:p-8 text-center space-y-2 shadow-md print:hidden">
-                <CheckCircle2 className="w-12 h-12 mx-auto text-emerald-200" />
-                <h2 className="text-2xl font-bold">¡Contrato Firmado y Registrado!</h2>
-                <p className="text-sm text-emerald-100 max-w-lg mx-auto">
-                  Tu reservación con folio <strong>{completedReservation.folio}</strong> ya está
-                  en nuestra base de datos. En breve validaremos tu depósito y te enviaremos tu
-                  confirmación oficial a <strong>{completedReservation.client_email}</strong>.
+              <div className="bg-[#2E9E5B] text-white rounded-3xl p-6 sm:p-8 text-center space-y-2 shadow-md print:hidden">
+                <CheckCircle2 className="w-12 h-12 mx-auto text-white/90" />
+                <h2 className="text-2xl font-extrabold">¡Reservación Enviada!</h2>
+                <p className="text-sm text-white/95 max-w-xl mx-auto">
+                  Folio <strong>{completedReservation.folio}</strong>. Después de enviado, se va
+                  a verificar todo y recibirás tu confirmación en el correo{' '}
+                  <strong>{completedReservation.client_email}</strong>.
                 </p>
                 <div className="pt-4 flex flex-wrap justify-center gap-3">
                   <button
                     onClick={() => window.print()}
-                    className="bg-white text-emerald-800 hover:bg-emerald-50 font-bold text-sm px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-sm transition"
+                    className="bg-white text-[#1F4FBE] hover:bg-[#EAF6FD] font-bold text-sm px-5 py-2.5 rounded-2xl flex items-center gap-2 shadow-sm transition"
                   >
                     <Download className="w-4 h-4" />
                     <span>Descargar / Guardar Contrato en PDF</span>
@@ -1243,25 +1804,27 @@ Equipo de Tours Tehuacán`;
                       setAcceptedTerms(false);
                       setHasSignature(false);
                     }}
-                    className="bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-medium px-5 py-2.5 rounded-xl transition"
+                    className="bg-[#1F4FBE] hover:bg-[#173d96] text-white text-sm font-bold px-5 py-2.5 rounded-2xl transition"
                   >
                     Hacer otra reservación
                   </button>
                 </div>
               </div>
 
-              {/* Documento final listo para imprimir/guardar como PDF */}
               {renderLegalContractDocument({
                 folio: completedReservation.folio,
                 dateStr: new Date(completedReservation.created_at).toLocaleString('es-MX'),
                 clientName: completedReservation.client_name,
                 clientId: completedReservation.client_id_number,
                 clientPhone: completedReservation.client_phone,
+                emergencyContact: completedReservation.emergency_contact,
                 clientEmail: completedReservation.client_email,
-                companions: completedReservation.companions,
+                seatNamesText: completedReservation.seat_names,
+                childrenText: completedReservation.children_info,
+                promoUsed: completedReservation.promo_code_used,
                 tourTitle: completedReservation.tour_title,
                 tourDate: completedReservation.tour_date,
-                passengersCount: completedReservation.passengers,
+                seatsCountVal: completedReservation.passengers,
                 total: completedReservation.total_amount,
                 deposit: completedReservation.deposit_amount,
                 signatureImg: completedReservation.signature_data,
@@ -1276,23 +1839,24 @@ Equipo de Tours Tehuacán`;
           VISTA PRIVADA DE ADMINISTRADOR (PROTEGIDA CON SUPABASE AUTH)
          ==================================================================== */}
       {view === 'admin' && (
-        <main className="max-w-6xl mx-auto px-4 py-8">
+        <main className="max-w-6xl mx-auto px-4 py-8 flex-1 w-full">
           {!session ? (
-            /* FORMULARIO DE INICIO DE SESIÓN */
-            <div className="max-w-md mx-auto bg-white border border-slate-200 rounded-2xl p-8 shadow-sm space-y-6 mt-8">
+            <div className="max-w-md mx-auto bg-white border border-slate-200 rounded-3xl p-8 shadow-sm space-y-6 mt-8">
               <div className="text-center">
-                <div className="w-12 h-12 bg-slate-900 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-3">
+                <div className="w-12 h-12 bg-[#EAF6FD] text-[#1F4FBE] rounded-2xl flex items-center justify-center mx-auto mb-3">
                   <Lock className="w-6 h-6" />
                 </div>
-                <h2 className="text-xl font-bold text-slate-900">Panel Privado de Agencia</h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Inicia sesión con tu cuenta autorizada de Tours Tehuacán
+                <h2 className="text-xl font-extrabold text-[#1F4FBE]">
+                  Panel Privado de Agencia
+                </h2>
+                <p className="text-xs text-[#5A6470] mt-1">
+                  Inicia sesión con tu cuenta autorizada de {AGENCY_INFO.name}
                 </p>
               </div>
 
               <form onSubmit={handleAdminLogin} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-[#111111] mb-1">
                     Correo de Administrador
                   </label>
                   <input
@@ -1300,12 +1864,12 @@ Equipo de Tours Tehuacán`;
                     required
                     value={authEmail}
                     onChange={(e) => setAuthEmail(e.target.value)}
-                    placeholder="tourstehuacan@gmail.com"
-                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                    placeholder={AGENCY_INFO.email}
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#1F4FBE]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  <label className="block text-xs font-bold text-[#111111] mb-1">
                     Contraseña
                   </label>
                   <input
@@ -1314,12 +1878,12 @@ Equipo de Tours Tehuacán`;
                     value={authPassword}
                     onChange={(e) => setAuthPassword(e.target.value)}
                     placeholder="••••••••••••"
-                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[#1F4FBE]"
                   />
                 </div>
 
                 {authError && (
-                  <p className="text-xs text-red-600 bg-red-50 border border-red-200 p-2.5 rounded-lg">
+                  <p className="text-xs text-[#D92D20] bg-red-50 border border-red-200 p-2.5 rounded-xl">
                     {authError}
                   </p>
                 )}
@@ -1327,7 +1891,7 @@ Equipo de Tours Tehuacán`;
                 <button
                   type="submit"
                   disabled={authLoading}
-                  className="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 rounded-xl text-sm flex items-center justify-center gap-2 transition"
+                  className="w-full bg-[#1F4FBE] hover:bg-[#173d96] text-white font-bold py-3 rounded-2xl text-sm flex items-center justify-center gap-2 transition"
                 >
                   {authLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -1338,14 +1902,13 @@ Equipo de Tours Tehuacán`;
               </form>
             </div>
           ) : (
-            /* DASHBOARD ADMINISTRATIVO AUTENTICADO */
             <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-sm">
                 <div>
-                  <h2 className="text-xl font-bold text-slate-900">
+                  <h2 className="text-xl font-extrabold text-[#1F4FBE]">
                     Control de Reservaciones y Tours
                   </h2>
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-[#5A6470]">
                     Conectado como: <strong>{session.user.email}</strong>
                   </p>
                 </div>
@@ -1353,27 +1916,37 @@ Equipo de Tours Tehuacán`;
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => setAdminTab('reservations')}
-                    className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
                       adminTab === 'reservations'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        ? 'bg-[#1F4FBE] text-white'
+                        : 'bg-[#F4F6F8] text-[#111111] hover:bg-slate-200'
                     }`}
                   >
                     Reservaciones ({reservations.length})
                   </button>
                   <button
+                    onClick={() => setAdminTab('excel')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                      adminTab === 'excel'
+                        ? 'bg-[#1F4FBE] text-white'
+                        : 'bg-[#F4F6F8] text-[#111111] hover:bg-slate-200'
+                    }`}
+                  >
+                    <TableIcon className="w-3.5 h-3.5" /> Tabla para Excel
+                  </button>
+                  <button
                     onClick={() => setAdminTab('tours')}
-                    className={`px-4 py-2 rounded-xl text-xs font-semibold transition ${
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition ${
                       adminTab === 'tours'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        ? 'bg-[#1F4FBE] text-white'
+                        : 'bg-[#F4F6F8] text-[#111111] hover:bg-slate-200'
                     }`}
                   >
                     Catálogo de Tours ({tours.length})
                   </button>
                   <button
                     onClick={handleAdminLogout}
-                    className="px-3 py-2 rounded-xl text-xs font-semibold bg-red-50 text-red-600 hover:bg-red-100 flex items-center gap-1"
+                    className="px-3 py-2 rounded-xl text-xs font-bold bg-red-50 text-[#D92D20] hover:bg-red-100 flex items-center gap-1"
                   >
                     <LogOut className="w-3.5 h-3.5" /> Salir
                   </button>
@@ -1395,10 +1968,10 @@ Equipo de Tours Tehuacán`;
                         <button
                           key={tab.id}
                           onClick={() => setStatusFilter(tab.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition ${
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition ${
                             statusFilter === tab.id
-                              ? 'bg-slate-900 text-white border-slate-900'
-                              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                              ? 'bg-[#1F4FBE] text-white border-[#1F4FBE]'
+                              : 'bg-white text-[#5A6470] border-slate-200 hover:bg-slate-50'
                           }`}
                         >
                           {tab.label}
@@ -1408,19 +1981,19 @@ Equipo de Tours Tehuacán`;
 
                     <button
                       onClick={fetchReservations}
-                      className="text-xs text-emerald-700 font-semibold hover:underline"
+                      className="text-xs text-[#1F4FBE] font-bold hover:underline"
                     >
                       Actualizar lista
                     </button>
                   </div>
 
                   {loadingReservations ? (
-                    <div className="text-center py-12 text-slate-500">
-                      <Loader2 className="w-7 h-7 animate-spin mx-auto text-emerald-600 mb-2" />
-                      <p className="text-xs">Cargando reservaciones desde Supabase...</p>
+                    <div className="text-center py-12 text-[#5A6470]">
+                      <Loader2 className="w-7 h-7 animate-spin mx-auto text-[#1F4FBE] mb-2" />
+                      <p className="text-xs">Cargando reservaciones...</p>
                     </div>
                   ) : filteredReservations.length === 0 ? (
-                    <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-slate-500 text-sm">
+                    <div className="bg-white border border-slate-200 rounded-3xl p-10 text-center text-[#5A6470] text-sm">
                       No hay reservaciones en esta categoría todavía.
                     </div>
                   ) : (
@@ -1428,18 +2001,22 @@ Equipo de Tours Tehuacán`;
                       {filteredReservations.map((res) => (
                         <div
                           key={res.id}
-                          className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4"
+                          className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div>
-                              <span className="font-mono text-xs font-bold bg-slate-100 px-2.5 py-1 rounded text-slate-800">
+                              <span className="font-mono text-xs font-bold bg-[#EAF6FD] px-2.5 py-1 rounded-lg text-[#1F4FBE]">
                                 {res.folio}
                               </span>
-                              <h3 className="font-bold text-slate-900 text-base mt-1.5">
+                              <h3 className="font-bold text-[#111111] text-base mt-1.5">
                                 {res.client_name}
                               </h3>
-                              <p className="text-xs text-slate-500">
-                                {res.client_email} • {res.client_phone}
+                              <p className="text-xs text-[#5A6470]">
+                                {res.client_email} • WhatsApp: {res.client_phone}
+                              </p>
+                              <p className="text-xs text-[#5A6470]">
+                                Emergencia: {res.emergency_contact || '—'} • ID:{' '}
+                                {res.client_id_number}
                               </p>
                             </div>
 
@@ -1447,12 +2024,12 @@ Equipo de Tours Tehuacán`;
                               <span
                                 className={`inline-block text-[11px] font-bold px-2.5 py-1 rounded-full ${
                                   res.status === 'verified'
-                                    ? 'bg-emerald-100 text-emerald-800'
+                                    ? 'bg-emerald-100 text-[#2E9E5B]'
                                     : res.status === 'paid'
-                                    ? 'bg-blue-100 text-blue-800'
+                                    ? 'bg-[#EAF6FD] text-[#1F4FBE]'
                                     : res.status === 'cancelled'
-                                    ? 'bg-red-100 text-red-800'
-                                    : 'bg-amber-100 text-amber-800'
+                                    ? 'bg-red-100 text-[#D92D20]'
+                                    : 'bg-amber-100 text-[#F58220]'
                                 }`}
                               >
                                 {res.status === 'verified'
@@ -1461,23 +2038,30 @@ Equipo de Tours Tehuacán`;
                                   ? 'Liquidado'
                                   : res.status === 'cancelled'
                                   ? 'Cancelado'
-                                  : 'Pendiente de Verificar'}
+                                  : 'Pendiente'}
                               </span>
 
                               {res.email_sent && (
-                                <span className="block text-[10px] font-semibold text-emerald-700">
+                                <span className="block text-[10px] font-semibold text-[#2E9E5B]">
                                   ✓ Confirmación enviada
                                 </span>
                               )}
                             </div>
                           </div>
 
-                          <div className="bg-slate-50 p-3 rounded-xl text-xs space-y-1 border border-slate-100">
-                            <p className="font-semibold text-slate-800">{res.tour_title}</p>
-                            <p className="text-slate-600">
-                              Salida: {res.tour_date} • <strong>{res.passengers} lugar(es)</strong>
+                          <div className="bg-[#F4F6F8] p-3 rounded-2xl text-xs space-y-1 border border-slate-100">
+                            <p className="font-bold text-[#1F4FBE]">
+                              {res.tour_title} ({res.tour_date})
                             </p>
-                            <p className="text-slate-700">
+                            <p className="text-[#5A6470]">
+                              Asientos: <strong>{res.passengers}</strong> •{' '}
+                              {res.seat_names || res.companions || ''}
+                            </p>
+                            <p className="text-[#5A6470]">
+                              Niños: {res.children_info || 'No viajan niños'}
+                            </p>
+                            <p className="text-[#111111]">
+                              Código: <strong>{res.promo_code_used || 'PRECIO NORMAL'}</strong> •
                               Anticipo:{' '}
                               <strong>
                                 ${Number(res.deposit_amount).toLocaleString('es-MX')} MXN
@@ -1489,7 +2073,7 @@ Equipo de Tours Tehuacán`;
                           <div className="flex flex-wrap items-center gap-2 pt-1">
                             <button
                               onClick={() => setSelectedReservationModal(res)}
-                              className="flex-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5"
+                              className="flex-1 bg-[#1F4FBE] hover:bg-[#173d96] text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5"
                             >
                               <Eye className="w-3.5 h-3.5" />
                               <span>Revisar Depósito</span>
@@ -1497,7 +2081,7 @@ Equipo de Tours Tehuacán`;
 
                             <button
                               onClick={() => setEmailModalReservation(res)}
-                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5"
+                              className="flex-1 bg-[#F58220] hover:bg-[#e07314] text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5"
                             >
                               <Mail className="w-3.5 h-3.5" />
                               <span>Enviar Confirmación</span>
@@ -1505,7 +2089,7 @@ Equipo de Tours Tehuacán`;
 
                             <button
                               onClick={() => setContractViewReservation(res)}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold py-2 px-3 rounded-xl flex items-center gap-1"
+                              className="bg-[#EAF6FD] hover:bg-[#d8effc] text-[#1F4FBE] text-xs font-bold py-2 px-3 rounded-xl flex items-center gap-1"
                               title="Ver Contrato Firmado"
                             >
                               <FileText className="w-3.5 h-3.5" />
@@ -1518,14 +2102,102 @@ Equipo de Tours Tehuacán`;
                 </div>
               )}
 
-              {/* PESTAÑA 2: CATÁLOGO DE TOURS */}
+              {/* PESTAÑA 2: TABLA PARA COPIAR Y PEGAR EN EXCEL */}
+              {adminTab === 'excel' && (
+                <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-extrabold text-[#1F4FBE] text-base">
+                        Base de Datos Lista para Copiar y Pegar en Excel
+                      </h3>
+                      <p className="text-xs text-[#5A6470]">
+                        Selecciona celdas directamente o usa el botón para copiar toda la tabla
+                        separada por columnas y pegarla con <strong>Ctrl + V</strong> en Excel.
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleCopyAllForExcel}
+                      className="bg-[#2E9E5B] hover:bg-[#25834b] text-white text-xs font-bold px-4 py-2.5 rounded-2xl flex items-center gap-1.5 shrink-0"
+                    >
+                      {copiedExcelAll ? (
+                        <>
+                          <Check className="w-4 h-4" /> Tabla copiada para Excel
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" /> Copiar todo para Excel
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
+                    <table className="min-w-full text-xs text-left border-collapse">
+                      <thead className="bg-[#1F4FBE] text-white">
+                        <tr>
+                          <th className="p-2.5 border border-[#173d96]">Folio</th>
+                          <th className="p-2.5 border border-[#173d96]">Viaje</th>
+                          <th className="p-2.5 border border-[#173d96]">Titular</th>
+                          <th className="p-2.5 border border-[#173d96]">WhatsApp</th>
+                          <th className="p-2.5 border border-[#173d96]">Emergencia</th>
+                          <th className="p-2.5 border border-[#173d96]">Correo</th>
+                          <th className="p-2.5 border border-[#173d96]">CURP / INE</th>
+                          <th className="p-2.5 border border-[#173d96]">Asientos</th>
+                          <th className="p-2.5 border border-[#173d96]">Nombres por Asiento</th>
+                          <th className="p-2.5 border border-[#173d96]">Niños</th>
+                          <th className="p-2.5 border border-[#173d96]">Código</th>
+                          <th className="p-2.5 border border-[#173d96]">Total</th>
+                          <th className="p-2.5 border border-[#173d96]">Anticipo</th>
+                          <th className="p-2.5 border border-[#173d96]">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reservations.map((r) => (
+                          <tr key={r.id} className="odd:bg-white even:bg-[#F4F6F8]">
+                            <td className="p-2 border border-slate-200 font-mono">{r.folio}</td>
+                            <td className="p-2 border border-slate-200">{r.tour_title}</td>
+                            <td className="p-2 border border-slate-200 font-medium">
+                              {r.client_name}
+                            </td>
+                            <td className="p-2 border border-slate-200">{r.client_phone}</td>
+                            <td className="p-2 border border-slate-200">
+                              {r.emergency_contact || '—'}
+                            </td>
+                            <td className="p-2 border border-slate-200">{r.client_email}</td>
+                            <td className="p-2 border border-slate-200 font-mono">
+                              {r.client_id_number}
+                            </td>
+                            <td className="p-2 border border-slate-200 text-center">
+                              {r.passengers}
+                            </td>
+                            <td className="p-2 border border-slate-200">
+                              {r.seat_names || r.companions || '—'}
+                            </td>
+                            <td className="p-2 border border-slate-200">
+                              {r.children_info || 'No viajan niños'}
+                            </td>
+                            <td className="p-2 border border-slate-200">
+                              {r.promo_code_used || 'PRECIO NORMAL'}
+                            </td>
+                            <td className="p-2 border border-slate-200">${r.total_amount}</td>
+                            <td className="p-2 border border-slate-200">${r.deposit_amount}</td>
+                            <td className="p-2 border border-slate-200">{r.status}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* PESTAÑA 3: CATÁLOGO DE TOURS (PRECIO NORMAL + PRECIO CLIENTE) */}
               {adminTab === 'tours' && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-slate-900">Viajes Publicados</h3>
+                    <h3 className="font-extrabold text-[#1F4FBE]">Viajes Publicados</h3>
                     <button
                       onClick={openNewTourModal}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-1.5 shadow-sm"
+                      className="bg-[#F58220] hover:bg-[#e07314] text-white text-xs font-bold px-4 py-2.5 rounded-2xl flex items-center gap-1.5 shadow-sm"
                     >
                       <Plus className="w-4 h-4" /> Nuevo Tour
                     </button>
@@ -1535,32 +2207,34 @@ Equipo de Tours Tehuacán`;
                     {tours.map((tour) => (
                       <div
                         key={tour.id}
-                        className="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-4"
+                        className="bg-white border border-slate-200 rounded-3xl p-4 flex items-center justify-between gap-4"
                       >
                         <div>
                           <div className="flex items-center gap-2">
                             <span
                               className={`w-2.5 h-2.5 rounded-full ${
-                                tour.active ? 'bg-emerald-500' : 'bg-slate-300'
+                                tour.active ? 'bg-[#2E9E5B]' : 'bg-slate-300'
                               }`}
                             />
-                            <h4 className="font-bold text-slate-900 text-sm">{tour.title}</h4>
+                            <h4 className="font-bold text-[#111111] text-sm">{tour.title}</h4>
                           </div>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            {tour.date} • ${Number(tour.price).toLocaleString('es-MX')} MXN
-                            (Anticipo ${Number(tour.deposit).toLocaleString('es-MX')})
+                          <p className="text-xs text-[#5A6470] mt-0.5">
+                            {tour.date} • Normal: ${Number(tour.price).toLocaleString('es-MX')} •
+                            Cliente/Niño: $
+                            {Number(tour.client_price ?? tour.price).toLocaleString('es-MX')} •
+                            Anticipo: ${Number(tour.deposit).toLocaleString('es-MX')}
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => openEditTourModal(tour)}
-                            className="p-2 bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700"
+                            className="p-2 bg-[#EAF6FD] hover:bg-[#d8effc] rounded-xl text-[#1F4FBE]"
                           >
                             <Edit3 className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => handleDeleteTour(tour.id)}
-                            className="p-2 bg-red-50 hover:bg-red-100 rounded-lg text-red-600"
+                            className="p-2 bg-red-50 hover:bg-red-100 rounded-xl text-[#D92D20]"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1576,39 +2250,106 @@ Equipo de Tours Tehuacán`;
       )}
 
       {/* ====================================================================
-          MODAL: REVISAR COMPROBANTE DE DEPÓSITO Y CAMBIAR ESTADO
+          PIE DE PÁGINA CON DATOS DE TOURS TEHUACÁN Y ACCESO DISCRETO AGENCIA
+         ==================================================================== */}
+      <footer className="bg-white text-[#111111] border-t border-slate-200 print:hidden">
+        <div className="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 md:grid-cols-3 gap-6 text-xs">
+          <div className="space-y-2">
+            <img
+              src={AGENCY_INFO.logoSrc}
+              alt={AGENCY_INFO.name}
+              className="h-14 w-auto object-contain"
+            />
+            <p className="text-[#5A6470] font-semibold">RNT: {AGENCY_INFO.rnt}</p>
+            <p className="text-[#5A6470] leading-relaxed">{AGENCY_INFO.address}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <h4 className="text-[#1F4FBE] font-extrabold text-sm">Contacto y Redes</h4>
+            <p>Llamadas y WhatsApp: {AGENCY_INFO.phone}</p>
+            <p>Correo: {AGENCY_INFO.email}</p>
+            <div className="flex flex-wrap gap-3 pt-1">
+              <a
+                href={AGENCY_INFO.facebookUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#1F4FBE] font-semibold hover:underline inline-flex items-center gap-1"
+              >
+                Facebook: {AGENCY_INFO.facebookName} <ExternalLink className="w-3 h-3" />
+              </a>
+              <a
+                href={AGENCY_INFO.instagramUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[#1F4FBE] font-semibold hover:underline inline-flex items-center gap-1"
+              >
+                Instagram: {AGENCY_INFO.instagramHandle} <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <h4 className="text-[#1F4FBE] font-extrabold text-sm">
+              Depósitos {AGENCY_INFO.bank}
+            </h4>
+            <p>Titular: {AGENCY_INFO.holder}</p>
+            <p className="font-mono text-[11px]">CLABE: {AGENCY_INFO.clabe}</p>
+            <p className="font-mono text-[11px]">Tarjeta: {AGENCY_INFO.card}</p>
+            <p className="font-mono text-[11px]">Cajero / Cuenta: {AGENCY_INFO.accountNumber}</p>
+          </div>
+        </div>
+
+        <div className="bg-[#F4F6F8] border-t border-slate-200 py-3 px-4 max-w-6xl mx-auto flex items-center justify-between text-[11px] text-[#5A6470]">
+          <span>
+            © {new Date().getFullYear()} {AGENCY_INFO.name} — {AGENCY_INFO.slogan}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setView('admin');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="text-[#5A6470] hover:text-[#1F4FBE] underline-offset-2 hover:underline transition"
+          >
+            Agencia
+          </button>
+        </div>
+      </footer>
+
+      {/* ====================================================================
+          MODALES DE ADMINISTRACIÓN
          ==================================================================== */}
       {selectedReservationModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <h3 className="font-bold text-slate-900">
+                <h3 className="font-bold text-[#1F4FBE]">
                   Comprobante — {selectedReservationModal.folio}
                 </h3>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-[#5A6470]">
                   {selectedReservationModal.client_name} • Anticipo esperado: $
                   {Number(selectedReservationModal.deposit_amount).toLocaleString('es-MX')} MXN
                 </p>
               </div>
               <button
                 onClick={() => setSelectedReservationModal(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100"
+                className="p-1.5 rounded-xl hover:bg-[#F4F6F8]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="bg-slate-100 rounded-xl p-2 flex justify-center">
+            <div className="bg-[#F4F6F8] rounded-2xl p-2 flex justify-center">
               <img
                 src={selectedReservationModal.receipt_url}
                 alt="Comprobante de transferencia"
-                className="max-h-96 rounded-lg object-contain"
+                className="max-h-96 rounded-xl object-contain"
               />
             </div>
 
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-700">
+              <label className="block text-xs font-bold text-[#111111]">
                 Actualizar Estado del Pago:
               </label>
               <div className="grid grid-cols-2 gap-2">
@@ -1616,13 +2357,13 @@ Equipo de Tours Tehuacán`;
                   onClick={() =>
                     updateReservationStatus(selectedReservationModal.id, 'verified')
                   }
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 rounded-xl"
+                  className="bg-[#2E9E5B] hover:bg-[#25834b] text-white text-xs font-bold py-2.5 rounded-xl"
                 >
                   ✓ Aprobar Anticipo
                 </button>
                 <button
                   onClick={() => updateReservationStatus(selectedReservationModal.id, 'paid')}
-                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2.5 rounded-xl"
+                  className="bg-[#1F4FBE] hover:bg-[#173d96] text-white text-xs font-bold py-2.5 rounded-xl"
                 >
                   ★ Marcar Liquidado
                 </button>
@@ -1630,7 +2371,7 @@ Equipo de Tours Tehuacán`;
                   onClick={() =>
                     updateReservationStatus(selectedReservationModal.id, 'pending')
                   }
-                  className="bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-semibold py-2 rounded-xl"
+                  className="bg-amber-100 hover:bg-amber-200 text-[#F58220] text-xs font-bold py-2 rounded-xl"
                 >
                   Dejar Pendiente
                 </button>
@@ -1638,7 +2379,7 @@ Equipo de Tours Tehuacán`;
                   onClick={() =>
                     updateReservationStatus(selectedReservationModal.id, 'cancelled')
                   }
-                  className="bg-red-100 hover:bg-red-200 text-red-800 text-xs font-semibold py-2 rounded-xl"
+                  className="bg-red-100 hover:bg-red-200 text-[#D92D20] text-xs font-bold py-2 rounded-xl"
                 >
                   Cancelar Reserva
                 </button>
@@ -1651,18 +2392,15 @@ Equipo de Tours Tehuacán`;
                 setSelectedReservationModal(null);
                 setEmailModalReservation(current);
               }}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold py-3 rounded-xl flex items-center justify-center gap-2"
+              className="w-full bg-[#F58220] hover:bg-[#e07314] text-white text-xs font-bold py-3 rounded-2xl flex items-center justify-center gap-2"
             >
-              <Mail className="w-4 h-4 text-emerald-400" />
-              <span>Enviar Confirmación de Pago por Correo</span>
+              <Mail className="w-4 h-4" />
+              <span>Enviar Confirmación por Correo</span>
             </button>
           </div>
         </div>
       )}
 
-      {/* ====================================================================
-          MODAL: ENVIAR CONFIRMACIÓN POR CORREO ELECTRÓNICO
-         ==================================================================== */}
       {emailModalReservation &&
         (() => {
           const { subject, body } = buildConfirmationEmail(emailModalReservation);
@@ -1672,19 +2410,19 @@ Equipo de Tours Tehuacán`;
 
           return (
             <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+              <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div>
-                    <h3 className="font-bold text-slate-900">
-                      Confirmación de Reservación y Recibo
+                    <h3 className="font-bold text-[#1F4FBE]">
+                      Confirmación de Reservación
                     </h3>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-[#5A6470]">
                       Para: <strong>{emailModalReservation.client_email}</strong>
                     </p>
                   </div>
                   <button
                     onClick={() => setEmailModalReservation(null)}
-                    className="p-1.5 rounded-lg hover:bg-slate-100"
+                    className="p-1.5 rounded-xl hover:bg-[#F4F6F8]"
                   >
                     <X className="w-5 h-5" />
                   </button>
@@ -1692,20 +2430,18 @@ Equipo de Tours Tehuacán`;
 
                 <div className="space-y-2 text-xs">
                   <div>
-                    <span className="font-semibold text-slate-600 block mb-1">Asunto:</span>
-                    <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg font-medium text-slate-800">
+                    <span className="font-semibold text-[#5A6470] block mb-1">Asunto:</span>
+                    <div className="bg-[#F4F6F8] border border-slate-200 p-2.5 rounded-xl font-medium text-[#111111]">
                       {subject}
                     </div>
                   </div>
                   <div>
-                    <span className="font-semibold text-slate-600 block mb-1">
-                      Mensaje de Confirmación:
-                    </span>
+                    <span className="font-semibold text-[#5A6470] block mb-1">Mensaje:</span>
                     <textarea
                       readOnly
                       rows={11}
                       value={body}
-                      className="w-full bg-slate-50 border border-slate-200 p-3 rounded-lg font-mono text-xs text-slate-800"
+                      className="w-full bg-[#F4F6F8] border border-slate-200 p-3 rounded-xl font-mono text-xs text-[#111111]"
                     />
                   </div>
                 </div>
@@ -1714,7 +2450,7 @@ Equipo de Tours Tehuacán`;
                   <a
                     href={mailtoLink}
                     onClick={() => markEmailAsSent(emailModalReservation.id)}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2"
+                    className="flex-1 bg-[#2E9E5B] hover:bg-[#25834b] text-white text-xs font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2"
                   >
                     <Send className="w-4 h-4" />
                     <span>Abrir en mi App de Correo</span>
@@ -1726,11 +2462,11 @@ Equipo de Tours Tehuacán`;
                       setCopiedEmail(true);
                       setTimeout(() => setCopiedEmail(false), 2500);
                     }}
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-1.5"
+                    className="bg-[#F4F6F8] hover:bg-slate-200 text-[#111111] text-xs font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-1.5"
                   >
                     {copiedEmail ? (
                       <>
-                        <Check className="w-4 h-4 text-emerald-600" />
+                        <Check className="w-4 h-4 text-[#2E9E5B]" />
                         <span>Copiado</span>
                       </>
                     ) : (
@@ -1743,7 +2479,7 @@ Equipo de Tours Tehuacán`;
 
                   <button
                     onClick={() => markEmailAsSent(emailModalReservation.id)}
-                    className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold py-3 px-4 rounded-xl"
+                    className="bg-[#1F4FBE] hover:bg-[#173d96] text-white text-xs font-bold py-3 px-4 rounded-xl"
                   >
                     Marcar Enviado
                   </button>
@@ -1753,26 +2489,23 @@ Equipo de Tours Tehuacán`;
           );
         })()}
 
-      {/* ====================================================================
-          MODAL: VER CONTRATO FIRMADO DESDE EL ADMIN
-         ==================================================================== */}
       {contractViewReservation && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between print:hidden">
-              <h3 className="font-bold text-slate-900">
+              <h3 className="font-bold text-[#1F4FBE]">
                 Contrato Firmado — {contractViewReservation.folio}
               </h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => window.print()}
-                  className="bg-emerald-600 text-white text-xs font-bold px-3 py-2 rounded-lg flex items-center gap-1"
+                  className="bg-[#2E9E5B] text-white text-xs font-bold px-3 py-2 rounded-xl flex items-center gap-1"
                 >
                   <Download className="w-3.5 h-3.5" /> Imprimir / PDF
                 </button>
                 <button
                   onClick={() => setContractViewReservation(null)}
-                  className="p-1.5 rounded-lg hover:bg-slate-100"
+                  className="p-1.5 rounded-xl hover:bg-[#F4F6F8]"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1785,11 +2518,14 @@ Equipo de Tours Tehuacán`;
               clientName: contractViewReservation.client_name,
               clientId: contractViewReservation.client_id_number,
               clientPhone: contractViewReservation.client_phone,
+              emergencyContact: contractViewReservation.emergency_contact,
               clientEmail: contractViewReservation.client_email,
-              companions: contractViewReservation.companions,
+              seatNamesText: contractViewReservation.seat_names || contractViewReservation.companions,
+              childrenText: contractViewReservation.children_info,
+              promoUsed: contractViewReservation.promo_code_used,
               tourTitle: contractViewReservation.tour_title,
               tourDate: contractViewReservation.tour_date,
-              passengersCount: contractViewReservation.passengers,
+              seatsCountVal: contractViewReservation.passengers,
               total: contractViewReservation.total_amount,
               deposit: contractViewReservation.deposit_amount,
               signatureImg: contractViewReservation.signature_data,
@@ -1799,19 +2535,16 @@ Equipo de Tours Tehuacán`;
         </div>
       )}
 
-      {/* ====================================================================
-          MODAL: CREAR O EDITAR TOUR
-         ==================================================================== */}
       {tourModalOpen && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-900">
+              <h3 className="font-bold text-[#1F4FBE]">
                 {editingTour ? 'Editar Tour' : 'Publicar Nuevo Tour'}
               </h3>
               <button
                 onClick={() => setTourModalOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-slate-100"
+                className="p-1.5 rounded-xl hover:bg-[#F4F6F8]"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1819,13 +2552,12 @@ Equipo de Tours Tehuacán`;
 
             <form onSubmit={handleSaveTour} className="space-y-3 text-xs">
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
+                <label className="font-semibold text-[#111111] block mb-1">
                   Nombre del Viaje *
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="Ej. Veracruz y Acuario Michin"
                   value={tourForm.title}
                   onChange={(e) => setTourForm({ ...tourForm, title: e.target.value })}
                   className="w-full border border-slate-300 rounded-xl px-3 py-2"
@@ -1834,26 +2566,22 @@ Equipo de Tours Tehuacán`;
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Destino *</label>
+                  <label className="font-semibold text-[#111111] block mb-1">Destino *</label>
                   <input
                     type="text"
                     required
-                    placeholder="Ej. Puerto de Veracruz"
                     value={tourForm.destination}
-                    onChange={(e) =>
-                      setTourForm({ ...tourForm, destination: e.target.value })
-                    }
+                    onChange={(e) => setTourForm({ ...tourForm, destination: e.target.value })}
                     className="w-full border border-slate-300 rounded-xl px-3 py-2"
                   />
                 </div>
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
+                  <label className="font-semibold text-[#111111] block mb-1">
                     Fecha de Salida *
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder="Ej. 15 de Diciembre 2026"
                     value={tourForm.date}
                     onChange={(e) => setTourForm({ ...tourForm, date: e.target.value })}
                     className="w-full border border-slate-300 rounded-xl px-3 py-2"
@@ -1861,10 +2589,10 @@ Equipo de Tours Tehuacán`;
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Precio Total ($) *
+                  <label className="font-semibold text-[#111111] block mb-1">
+                    Precio Normal ($) *
                   </label>
                   <input
                     type="number"
@@ -1875,7 +2603,21 @@ Equipo de Tours Tehuacán`;
                   />
                 </div>
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
+                  <label className="font-semibold text-[#111111] block mb-1">
+                    Precio Cliente ($) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    value={tourForm.client_price}
+                    onChange={(e) =>
+                      setTourForm({ ...tourForm, client_price: e.target.value })
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-[#111111] block mb-1">
                     Anticipo ($) *
                   </label>
                   <input
@@ -1887,7 +2629,7 @@ Equipo de Tours Tehuacán`;
                   />
                 </div>
                 <div>
-                  <label className="font-semibold text-slate-700 block mb-1">Cupos *</label>
+                  <label className="font-semibold text-[#111111] block mb-1">Cupo base</label>
                   <input
                     type="number"
                     required
@@ -1899,7 +2641,7 @@ Equipo de Tours Tehuacán`;
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">Duración</label>
+                <label className="font-semibold text-[#111111] block mb-1">Duración</label>
                 <input
                   type="text"
                   value={tourForm.duration}
@@ -1909,21 +2651,19 @@ Equipo de Tours Tehuacán`;
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
+                <label className="font-semibold text-[#111111] block mb-1">
                   ¿Qué incluye? (separado por comas)
                 </label>
                 <input
                   type="text"
                   value={tourForm.includesText}
-                  onChange={(e) =>
-                    setTourForm({ ...tourForm, includesText: e.target.value })
-                  }
+                  onChange={(e) => setTourForm({ ...tourForm, includesText: e.target.value })}
                   className="w-full border border-slate-300 rounded-xl px-3 py-2"
                 />
               </div>
 
               <div>
-                <label className="font-semibold text-slate-700 block mb-1">
+                <label className="font-semibold text-[#111111] block mb-1">
                   URL de Imagen del Destino
                 </label>
                 <input
@@ -1939,9 +2679,9 @@ Equipo de Tours Tehuacán`;
                   type="checkbox"
                   checked={tourForm.active}
                   onChange={(e) => setTourForm({ ...tourForm, active: e.target.checked })}
-                  className="accent-emerald-600"
+                  className="accent-[#1F4FBE]"
                 />
-                <span className="font-semibold text-slate-700">
+                <span className="font-semibold text-[#111111]">
                   Tour activo (visible para clientes)
                 </span>
               </label>
@@ -1950,13 +2690,13 @@ Equipo de Tours Tehuacán`;
                 <button
                   type="button"
                   onClick={() => setTourModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 font-semibold"
+                  className="px-4 py-2 rounded-xl bg-[#F4F6F8] text-[#111111] font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-emerald-600 text-white font-bold"
+                  className="px-5 py-2 rounded-xl bg-[#F58220] text-white font-bold"
                 >
                   Guardar Tour
                 </button>
